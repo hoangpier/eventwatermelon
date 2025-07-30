@@ -139,7 +139,7 @@ def run_event_bot_thread():
                     action_queue.clear()
                     action_queue.append(0)
                 elif not action_queue:
-                    num_moves = random.randint(7, 14)
+                    num_moves = random.randint(12, 24)
                     movement_indices = [1, 2, 3, 4]
                     for _ in range(num_moves):
                         action_queue.append(random.choice(movement_indices))
