@@ -33,7 +33,7 @@ loop_delay_seconds = 3600  # Mặc định 1 giờ
 lock = threading.Lock()
 
 # ===================================================================
-# LOGIC BOT (LẤY TỪ FILE CỦA BẠN)
+# LOGIC BOT
 # ===================================================================
 
 def run_event_bot_thread():
@@ -47,7 +47,6 @@ def run_event_bot_thread():
     with lock:
         bot_instance = bot
 
-    # --- LOGIC CLICK GIỮ NGUYÊN TỪ FILE CỦA BẠN ---
     def click_button_by_index(message_data, index):
         try:
             rows = [comp['components'] for comp in message_data.get('components', []) if 'components' in comp]
@@ -102,7 +101,6 @@ def run_event_bot_thread():
         click_button_by_index(message_data, 2)
         print("INFO: Đã hoàn thành lượt. Chờ game tự động cập nhật để bắt đầu lượt mới...")
 
-    # --- LOGIC ON_MESSAGE GIỮ NGUYÊN TỪ FILE CỦA BẠN ---
     @bot.gateway.command
     def on_message(resp):
         nonlocal active_message_id, action_queue
@@ -150,7 +148,6 @@ def run_event_bot_thread():
                     next_action_index = action_queue.popleft()
                     threading.Thread(target=click_button_by_index, args=(m, next_action_index)).start()
 
-    # Sử dụng on_ready để gửi lệnh đầu tiên một cách đáng tin cậy
     initial_kevent_sent = False
     @bot.gateway.command
     def on_ready(resp):
@@ -160,13 +157,12 @@ def run_event_bot_thread():
             bot.sendMessage(CHANNEL_ID, "kevent")
             initial_kevent_sent = True
 
-    # Khởi chạy gateway
     print("[EVENT BOT] Luồng bot đã khởi động, đang kết nối gateway...", flush=True)
     bot.gateway.run(auto_reconnect=True)
     print("[EVENT BOT] Luồng bot đã dừng.", flush=True)
 
 # ===================================================================
-# CÁC HÀM TIỆN ÍCH VÀ VÒNG LẶP NỀN
+# VÒNG LẶP TỰ ĐỘNG
 # ===================================================================
 
 def run_hourly_loop_thread():
@@ -178,14 +174,15 @@ def run_hourly_loop_thread():
         for _ in range(loop_delay_seconds):
             if not is_hourly_loop_enabled:
                 break
-            time.sleep(15)
+            # SỬA LỖI 1: Thay đổi từ 15 giây thành 1 giây để thời gian chờ chính xác.
+            time.sleep(1)
         
         with lock:
             if is_hourly_loop_enabled and bot_instance and is_bot_running:
                 print(f"\n[HOURLY LOOP] Hết {loop_delay_seconds} giây. Tự động gửi lại lệnh 'kevent'...", flush=True)
                 bot_instance.sendMessage(CHANNEL_ID, "kevent")
             else:
-                break # Thoát khỏi vòng lặp nếu bị tắt từ web
+                break
     print("[HOURLY LOOP] Luồng vòng lặp đã dừng.", flush=True)
 
 # ===================================================================
@@ -193,6 +190,7 @@ def run_hourly_loop_thread():
 # ===================================================================
 app = Flask(__name__)
 
+# SỬA LỖI 2: Đã cập nhật JavaScript bên trong HTML_TEMPLATE
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="vi">
@@ -238,7 +236,11 @@ HTML_TEMPLATE = """
                 loopStatusDiv.textContent = data.is_hourly_loop_enabled ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
                 loopStatusDiv.className = data.is_hourly_loop_enabled ? 'status status-on' : 'status status-off';
                 toggleLoopBtn.textContent = data.is_hourly_loop_enabled ? 'TẮT VÒNG LẶP' : 'BẬT VÒNG LẶP';
-                delayInput.value = data.loop_delay_seconds;
+                
+                // SỬA LỖI 2: Chỉ cập nhật giá trị nếu người dùng không đang gõ vào ô input.
+                if (document.activeElement !== delayInput) {
+                    delayInput.value = data.loop_delay_seconds;
+                }
             } catch (e) { botStatusDiv.textContent = 'Lỗi kết nối đến server.'; botStatusDiv.className = 'status status-off'; }
         }
         toggleBotBtn.addEventListener('click', () => postData('/api/toggle_bot', {}));
