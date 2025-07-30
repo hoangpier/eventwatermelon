@@ -79,10 +79,11 @@ def run_event_bot_thread():
 
                     if 200 <= r.status_code < 300:
                         print(f"INFO: Click thành công! (Status: {r.status_code})")
-                        time.sleep(5)
+                        # Bạn có thể điều chỉnh thời gian chờ ở đây để tránh rate limit
+                        time.sleep(5) 
                         return 
                     elif r.status_code == 429:
-                        retry_after = r.json().get("retry_after", 5)
+                        retry_after = r.json().get("retry_after", 3)
                         print(f"WARN: Bị rate limit! Sẽ thử lại sau {retry_after:.2f} giây...")
                         time.sleep(retry_after)
                     else:
@@ -113,12 +114,16 @@ def run_event_bot_thread():
         if not (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == CHANNEL_ID): return
         
         with lock:
+            # FIX 3: Sửa lỗi logic không nhận game mới từ vòng lặp tự động.
+            # Bot sẽ luôn ưu tiên game mới nhất được tạo ra.
             if resp.event.message and "Takumi's Solisfair Stand" in m.get("embeds", [{}])[0].get("title", ""):
-                if active_message_id is not None: return
                 active_message_id = m.get("id")
                 action_queue.clear()
-                print(f"\nINFO: Bắt đầu game mới trên tin nhắn ID: {active_message_id}")
-            if m.get("id") != active_message_id: return
+                print(f"\nINFO: Đã phát hiện game mới. Chuyển sang tin nhắn ID: {active_message_id}")
+
+            # Chỉ xử lý các sự kiện (như update button) trên tin nhắn game đang hoạt động
+            if m.get("id") != active_message_id:
+                return
 
         embed_desc = m.get("embeds", [{}])[0].get("description", "")
         all_buttons_flat = [b for row in m.get('components', []) for b in row.get('components', []) if row.get('type') == 1]
@@ -139,7 +144,7 @@ def run_event_bot_thread():
                     action_queue.clear()
                     action_queue.append(0)
                 elif not action_queue:
-                    num_moves = random.randint(12, 24)
+                    num_moves = random.randint(15, 30)
                     movement_indices = [1, 2, 3, 4]
                     for _ in range(num_moves):
                         action_queue.append(random.choice(movement_indices))
@@ -174,7 +179,7 @@ def run_hourly_loop_thread():
         for _ in range(loop_delay_seconds):
             if not is_hourly_loop_enabled:
                 break
-            # SỬA LỖI 1: Thay đổi từ 15 giây thành 1 giây để thời gian chờ chính xác.
+            # FIX 1: Thời gian chờ chính xác
             time.sleep(1)
         
         with lock:
@@ -190,7 +195,6 @@ def run_hourly_loop_thread():
 # ===================================================================
 app = Flask(__name__)
 
-# SỬA LỖI 2: Đã cập nhật JavaScript bên trong HTML_TEMPLATE
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="vi">
@@ -237,7 +241,7 @@ HTML_TEMPLATE = """
                 loopStatusDiv.className = data.is_hourly_loop_enabled ? 'status status-on' : 'status status-off';
                 toggleLoopBtn.textContent = data.is_hourly_loop_enabled ? 'TẮT VÒNG LẶP' : 'BẬT VÒNG LẶP';
                 
-                // SỬA LỖI 2: Chỉ cập nhật giá trị nếu người dùng không đang gõ vào ô input.
+                // FIX 2: Sửa lỗi giật số trên giao diện web.
                 if (document.activeElement !== delayInput) {
                     delayInput.value = data.loop_delay_seconds;
                 }
