@@ -61,7 +61,7 @@ def run_event_bot_thread():
 
             headers = {"Authorization": TOKEN}
             
-            max_retries = 3
+            max_retries = 6
             for attempt in range(max_retries):
                 session_id = bot.gateway.session_id 
                 payload = {
@@ -144,7 +144,7 @@ def run_event_bot_thread():
                     action_queue.clear()
                     action_queue.append(0)
                 elif not action_queue:
-                    num_moves = random.randint(15, 30)
+                    num_moves = random.randint(7, 14)
                     movement_indices = [1, 2, 3, 4]
                     for _ in range(num_moves):
                         action_queue.append(random.choice(movement_indices))
