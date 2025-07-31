@@ -61,7 +61,7 @@ def run_event_bot_thread():
 
             headers = {"Authorization": TOKEN}
             
-            max_retries = 6
+            max_retries = 3
             for attempt in range(max_retries):
                 session_id = bot.gateway.session_id 
                 payload = {
@@ -83,7 +83,7 @@ def run_event_bot_thread():
                         time.sleep(5) 
                         return 
                     elif r.status_code == 429:
-                        retry_after = r.json().get("retry_after", 3)
+                        retry_after = r.json().get("retry_after", 2.5)
                         print(f"WARN: Bị rate limit! Sẽ thử lại sau {retry_after:.2f} giây...")
                         time.sleep(retry_after)
                     else:
@@ -144,7 +144,7 @@ def run_event_bot_thread():
                     action_queue.clear()
                     action_queue.append(0)
                 elif not action_queue:
-                    num_moves = random.randint(7, 14)
+                    num_moves = random.randint(12, 24)
                     movement_indices = [1, 2, 3, 4]
                     for _ in range(num_moves):
                         action_queue.append(random.choice(movement_indices))
