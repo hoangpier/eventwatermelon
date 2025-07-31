@@ -61,7 +61,7 @@ def run_event_bot_thread():
 
             headers = {"Authorization": TOKEN}
             
-            max_retries = 3
+            max_retries = 40
             for attempt in range(max_retries):
                 session_id = bot.gateway.session_id 
                 payload = {
@@ -80,10 +80,10 @@ def run_event_bot_thread():
                     if 200 <= r.status_code < 300:
                         print(f"INFO: Click thành công! (Status: {r.status_code})")
                         # Bạn có thể điều chỉnh thời gian chờ ở đây để tránh rate limit
-                        time.sleep(5) 
+                        time.sleep(2.5) 
                         return 
                     elif r.status_code == 429:
-                        retry_after = r.json().get("retry_after", 2.5)
+                        retry_after = r.json().get("retry_after", 1.5)
                         print(f"WARN: Bị rate limit! Sẽ thử lại sau {retry_after:.2f} giây...")
                         time.sleep(retry_after)
                     else:
@@ -141,14 +141,36 @@ def run_event_bot_thread():
         elif is_movement_phase:
             with lock:
                 if found_good_move:
+                    print("INFO: NGẮT QUÃNG - Phát hiện nước đi có kết quả. Xóa hàng đợi và xác nhận ngay.", flush=True)
                     action_queue.clear()
                     action_queue.append(0)
                 elif not action_queue:
-                    num_moves = random.randint(12, 24)
+                    print("INFO: Bắt đầu lượt mới. Tạo chuỗi hành động kết hợp...", flush=True)
+                    
+                    # --- BƯỚC 1: Thêm công thức cố định của bạn ---
+                    fixed_sequence = [
+                        1, 1,       # 2 lần nút 1 (Lên)
+                        2, 2,       # 2 lần nút 2 (Trái)
+                        3, 3, 3, 3, # 4 lần nút 3 (Xuống)
+                        4, 4, 4, 4, # 4 lần nút 4 (Phải)
+                        1, 1, 1, 1, # 4 lần nút 1 (Lên)
+                        2, 2,       # 2 lần nút 2 (Trái)
+                        3, 3        # 2 lần nút 3 (Xuống)
+                    ]
+                    action_queue.extend(fixed_sequence)
+                    print(f"INFO: -> Đã thêm {len(fixed_sequence)} bước di chuyển theo công thức.", flush=True)
+
+                    num_moves = random.randint(4, 12)
                     movement_indices = [1, 2, 3, 4]
-                    for _ in range(num_moves):
-                        action_queue.append(random.choice(movement_indices))
+                    random_sequence = [random.choice(movement_indices) for _ in range(num_moves)]
+                    action_queue.extend(random_sequence)
+                    print(f"INFO: -> Đã thêm {num_moves} bước di chuyển ngẫu nhiên.", flush=True)
+
+                    # --- BƯỚC 3: Thêm hành động xác nhận cuối cùng ---
                     action_queue.append(0)
+                    print(f"INFO: Chuỗi hành động mới có tổng cộng {len(action_queue)} bước.", flush=True)
+
+                # Luôn thực hiện hành động tiếp theo trong hàng đợi
                 if action_queue:
                     next_action_index = action_queue.popleft()
                     threading.Thread(target=click_button_by_index, args=(m, next_action_index)).start()
