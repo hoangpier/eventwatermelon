@@ -145,7 +145,7 @@ def load_settings():
 # CÁC HÀM LOGIC CỐT LÕI
 # ===================================================================
 
-def robust_click_button(bot, message_data, custom_id, source=""): # MỚI: Hàm click mạnh mẽ cho KVI
+def robust_click_button(bot, message_data, custom_id, source=""):
     try:
         if not bot or not bot.gateway.session_id:
             print(f"[{source}] LỖI: Bot chưa kết nối.", flush=True); return False
@@ -281,7 +281,6 @@ def run_kvi_ai_clicker():
 
 # --- CÁC HÀM LOGIC GỐC ---
 def run_event_bot_thread():
-    # ... (Giữ nguyên toàn bộ nội dung hàm run_event_bot_thread)
     global is_event_bot_running, event_bot_instance
     active_message_id = None
     action_queue = deque()
@@ -311,7 +310,7 @@ def run_event_bot_thread():
         found_good_move = "If placed here, you will receive the following fruit:" in embed_desc
         has_received_fruit = "You received the following fruit:" in embed_desc
         if is_final_confirm_phase:
-            with lock: action_queue.clear()
+            with lock: action_queue.clear() 
             threading.Thread(target=perform_final_confirmation, args=(m,)).start()
         elif has_received_fruit:
             threading.Thread(target=click_button_by_index, args=(bot, m, 0, "EVENT BOT")).start()
@@ -337,7 +336,6 @@ def run_event_bot_thread():
         print("[EVENT BOT] Luồng bot sự kiện đã dừng.", flush=True)
 
 def run_autoclick_bot_thread():
-    # ... (Giữ nguyên toàn bộ nội dung hàm run_autoclick_bot_thread)
     global is_autoclick_running, autoclick_bot_instance, autoclick_clicks_done, autoclick_target_message_data
     bot = discum.Client(token=TOKEN, log=False)
     with lock: autoclick_bot_instance = bot
@@ -372,7 +370,6 @@ def run_autoclick_bot_thread():
 
 
 def run_auto_kd_thread():
-    # ... (Giữ nguyên toàn bộ nội dung hàm run_auto_kd_thread)
     global is_auto_kd_running, auto_kd_instance
     if not KD_CHANNEL_ID:
         with lock: is_auto_kd_running = False; save_settings(); return
@@ -402,30 +399,33 @@ def run_auto_kd_thread():
 
 
 def run_hourly_loop_thread():
-    # ... (Giữ nguyên toàn bộ nội dung hàm run_hourly_loop_thread)
     global is_hourly_loop_enabled, loop_delay_seconds
     while True:
         with lock:
             if not is_hourly_loop_enabled: break
+        # Chờ đợi trong N giây, nhưng kiểm tra mỗi giây để có thể dừng ngay lập tức
         for _ in range(loop_delay_seconds):
-            if not is_hourly_loop_enabled: break; time.sleep(1)
+            if not is_hourly_loop_enabled: break
+            time.sleep(1)
+        
         with lock:
             if is_hourly_loop_enabled and event_bot_instance and is_event_bot_running:
                 print(f"\n[HOURLY LOOP] Gửi 'kevent'...", flush=True)
                 event_bot_instance.sendMessage(CHANNEL_ID, "kevent")
-            elif not is_event_bot_running: break
+            elif not is_event_bot_running: 
+                # Nếu bot event không chạy nữa, vòng lặp cũng nên dừng
+                break 
     with lock: save_settings()
     print("[HOURLY LOOP] Luồng vòng lặp đã dừng.", flush=True)
 
 
 def spam_loop():
-    # ... (Giữ nguyên toàn bộ nội dung hàm spam_loop)
     bot = discum.Client(token=TOKEN, log=False)
     @bot.gateway.command
     def on_ready(resp):
         if resp.event.ready: print("[SPAM BOT] Gateway đã kết nối.", flush=True)
     threading.Thread(target=bot.gateway.run, daemon=True).start()
-    time.sleep(5)
+    time.sleep(5) 
     while True:
         with lock: panels_to_process = list(spam_panels)
         for panel in panels_to_process:
@@ -548,21 +548,158 @@ HTML_TEMPLATE = """
         <button class="add-panel-btn" onclick="addPanel()">+ Thêm Bảng Spam</button>
     </div>
     <script>
-        // ... (Giữ nguyên toàn bộ nội dung thẻ <script> từ file gốc)
-        // Thêm các dòng sau vào bên trong hàm fetchStatus() và các event listener
+        function showSaveStatus(message, isSuccess) {
+            const status = document.getElementById('saveStatus');
+            status.textContent = message;
+            status.className = 'save-status ' + (isSuccess ? 'save-success' : 'save-error');
+            status.style.display = 'block';
+            setTimeout(() => status.style.display = 'none', 3000);
+        }
         
-        // --- BÊN TRONG HÀM fetchStatus() ---
-        // Thêm khối này để cập nhật panel KVI
-        const autoKviStatusDiv = document.getElementById('auto-kvi-status'), toggleAutoKviBtn = document.getElementById('toggleAutoKviBtn');
-        autoKviStatusDiv.textContent = data.is_auto_kvi_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
-        autoKviStatusDiv.className = data.is_auto_kvi_running ? 'status status-on' : 'status status-off';
-        toggleAutoKviBtn.textContent = data.is_auto_kvi_running ? 'Dừng Auto KVI' : 'Bật Auto KVI';
-        document.getElementById('auto-kvi-panel').classList.toggle('active-mode', data.is_auto_kvi_running);
-        document.getElementById('kvi-channel-display').textContent = data.kvi_channel_id;
+        async function apiCall(endpoint, method = 'POST', body = null) {
+            const options = { method, headers: {'Content-Type': 'application/json'} };
+            if (body) options.body = JSON.stringify(body);
+            try {
+                const response = await fetch(endpoint, options);
+                const result = await response.json();
+                if (result.save_status !== undefined) {
+                    showSaveStatus(result.save_status ? 'Đã lưu thành công' : 'Lỗi khi lưu', result.save_status);
+                }
+                return result;
+            } catch (error) { 
+                console.error('API call failed:', error); 
+                showSaveStatus('Lỗi kết nối', false);
+                return { error: 'API call failed' }; 
+            }
+        }
+        
+        async function fetchStatus() {
+            const data = await apiCall('/api/status', 'GET');
+            if (data.error) { 
+                document.getElementById('event-bot-status').textContent = 'Lỗi kết nối server.'; 
+                return; 
+            }
+            
+            // Event Bot Panel
+            const eventBotStatusDiv = document.getElementById('event-bot-status'), toggleEventBotBtn = document.getElementById('toggleEventBotBtn');
+            eventBotStatusDiv.textContent = data.is_event_bot_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
+            eventBotStatusDiv.className = data.is_event_bot_running ? 'status status-on' : 'status status-off';
+            toggleEventBotBtn.textContent = data.is_event_bot_running ? 'Dừng Auto Play' : 'Bật Auto Play';
+            toggleEventBotBtn.disabled = data.is_autoclick_running;
+            document.getElementById('event-bot-panel').classList.toggle('active-mode', data.is_event_bot_running);
 
-        // --- BÊN DƯỚI CÁC addEventListener KHÁC ---
-        // Thêm event listener cho nút KVI
+            // Autoclick Panel
+            const autoclickStatusDiv = document.getElementById('autoclick-status'), toggleAutoclickBtn = document.getElementById('toggleAutoclickBtn');
+            const countText = data.autoclick_count > 0 ? `${data.autoclick_clicks_done}/${data.autoclick_count}` : `${data.autoclick_clicks_done}/∞`;
+            autoclickStatusDiv.textContent = data.is_autoclick_running ? `Trạng thái: ĐANG CHẠY (${countText})` : 'Trạng thái: ĐÃ DỪNG';
+            autoclickStatusDiv.className = data.is_autoclick_running ? 'status status-on' : 'status status-off';
+            toggleAutoclickBtn.textContent = data.is_autoclick_running ? 'Dừng Auto Click' : 'Bật Auto Click';
+            document.getElementById('autoclick-button-index').disabled = data.is_autoclick_running;
+            document.getElementById('autoclick-count').disabled = data.is_autoclick_running;
+            toggleAutoclickBtn.disabled = data.is_event_bot_running;
+            document.getElementById('autoclick-panel').classList.toggle('active-mode', data.is_autoclick_running);
+
+            // Auto KD Panel
+            document.getElementById('auto-kd-status').textContent = data.is_auto_kd_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
+            document.getElementById('auto-kd-status').className = data.is_auto_kd_running ? 'status status-on' : 'status status-off';
+            document.getElementById('toggleAutoKdBtn').textContent = data.is_auto_kd_running ? 'Dừng Auto KD' : 'Bật Auto KD';
+            document.getElementById('auto-kd-panel').classList.toggle('active-mode', data.is_auto_kd_running);
+            document.getElementById('kd-channel-display').textContent = data.kd_channel_id;
+            
+            // Auto KVI Panel
+            const autoKviStatusDiv = document.getElementById('auto-kvi-status'), toggleAutoKviBtn = document.getElementById('toggleAutoKviBtn');
+            autoKviStatusDiv.textContent = data.is_auto_kvi_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
+            autoKviStatusDiv.className = data.is_auto_kvi_running ? 'status status-on' : 'status status-off';
+            toggleAutoKviBtn.textContent = data.is_auto_kvi_running ? 'Dừng Auto KVI' : 'Bật Auto KVI';
+            document.getElementById('auto-kvi-panel').classList.toggle('active-mode', data.is_auto_kvi_running);
+            document.getElementById('kvi-channel-display').textContent = data.kvi_channel_id;
+
+            // Loop Panel
+            const loopStatusDiv = document.getElementById('loop-status'), toggleLoopBtn = document.getElementById('toggleLoopBtn');
+            loopStatusDiv.textContent = data.is_hourly_loop_enabled ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
+            loopStatusDiv.className = data.is_hourly_loop_enabled ? 'status status-on' : 'status status-off';
+            toggleLoopBtn.textContent = data.is_hourly_loop_enabled ? 'TẮT VÒNG LẶP' : 'BẬT VÒNG LẶP';
+            toggleLoopBtn.disabled = !data.is_event_bot_running && !data.is_hourly_loop_enabled;
+            document.getElementById('delay-input').value = data.loop_delay_seconds;
+        }
+        
+        document.getElementById('toggleEventBotBtn').addEventListener('click', () => apiCall('/api/toggle_event_bot').then(fetchStatus));
+        document.getElementById('toggleAutoclickBtn').addEventListener('click', () => {
+            apiCall('/api/toggle_autoclick', 'POST', { 
+                button_index: parseInt(document.getElementById('autoclick-button-index').value, 10), 
+                count: parseInt(document.getElementById('autoclick-count').value, 10) 
+            }).then(fetchStatus);
+        });
+        document.getElementById('toggleAutoKdBtn').addEventListener('click', () => apiCall('/api/toggle_auto_kd').then(fetchStatus));
         document.getElementById('toggleAutoKviBtn').addEventListener('click', () => apiCall('/api/toggle_auto_kvi').then(fetchStatus));
+        document.getElementById('toggleLoopBtn').addEventListener('click', () => {
+            const isEnabled = !document.getElementById('loop-status').textContent.includes('ĐANG CHẠY');
+            apiCall('/api/toggle_hourly_loop', 'POST', { 
+                enabled: isEnabled, 
+                delay: parseInt(document.getElementById('delay-input').value, 10) 
+            }).then(fetchStatus);
+        });
+        
+        function createPanelElement(panel) {
+            const div = document.createElement('div');
+            div.className = `spam-panel ${panel.is_active ? 'active' : ''}`; 
+            div.dataset.id = panel.id;
+            let countdown = panel.is_active ? panel.delay - (Date.now() / 1000 - panel.last_spam_time) : panel.delay;
+            countdown = Math.max(0, Math.ceil(countdown));
+            div.innerHTML = `
+                <textarea class="message-input" placeholder="Nội dung spam...">${panel.message}</textarea>
+                <input type="text" class="channel-input" placeholder="ID Kênh..." value="${panel.channel_id}">
+                <input type="number" class="delay-input" placeholder="Delay (giây)..." value="${panel.delay}">
+                <div class="spam-panel-controls">
+                    <button class="toggle-btn">${panel.is_active ? 'TẮT' : 'BẬT'}</button>
+                    <button class="delete-btn">XÓA</button>
+                </div>
+                <div class="timer">Hẹn giờ: ${countdown}s</div>
+            `;
+            
+            const getPanelData = () => ({ 
+                ...panel, 
+                message: div.querySelector('.message-input').value, 
+                channel_id: div.querySelector('.channel-input').value, 
+                delay: parseInt(div.querySelector('.delay-input').value, 10) || 60 
+            });
+            
+            div.querySelector('.toggle-btn').addEventListener('click', () => 
+                apiCall('/api/panel/update', 'POST', { ...getPanelData(), is_active: !panel.is_active }).then(fetchPanels)
+            );
+            div.querySelector('.delete-btn').addEventListener('click', () => { 
+                if (confirm('Xóa bảng này?')) 
+                    apiCall('/api/panel/delete', 'POST', { id: panel.id }).then(fetchPanels); 
+            });
+            // Update on change instead of blur for better UX
+            div.querySelector('.message-input').addEventListener('input', () => apiCall('/api/panel/update', 'POST', getPanelData()));
+            div.querySelector('.channel-input').addEventListener('input', () => apiCall('/api/panel/update', 'POST', getPanelData()));
+            div.querySelector('.delay-input').addEventListener('input', () => apiCall('/api/panel/update', 'POST', getPanelData()));
+            
+            return div;
+        }
+        
+        async function fetchPanels() {
+            // Avoid refetching if user is typing
+            const focusedEl = document.activeElement;
+            if (focusedEl && focusedEl.closest('.spam-panel')) return;
+
+            const data = await apiCall('/api/panels', 'GET');
+            const container = document.getElementById('panel-container'); 
+            container.innerHTML = '';
+            if (data.panels) data.panels.forEach(panel => container.appendChild(createPanelElement(panel)));
+        }
+        
+        async function addPanel() { 
+            await apiCall('/api/panel/add'); 
+            fetchPanels(); 
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchStatus(); fetchPanels();
+            setInterval(fetchStatus, 2000); 
+            setInterval(fetchPanels, 2000);
+        });
     </script>
 </body>
 </html>
@@ -570,7 +707,6 @@ HTML_TEMPLATE = """
 
 @app.route("/")
 def index():
-    # ... (Giữ nguyên toàn bộ nội dung hàm index)
     return render_template_string(HTML_TEMPLATE)
 
 @app.route("/api/status", methods=['GET'])
@@ -586,49 +722,64 @@ def status():
             "autoclick_clicks_done": autoclick_clicks_done,
             "is_auto_kd_running": is_auto_kd_running,
             "kd_channel_id": KD_CHANNEL_ID or "Chưa cấu hình",
-            "is_auto_kvi_running": is_auto_kvi_running, # MỚI
-            "kvi_channel_id": KVI_CHANNEL_ID or "Chưa cấu hình" # MỚI
+            "is_auto_kvi_running": is_auto_kvi_running,
+            "kvi_channel_id": KVI_CHANNEL_ID or "Chưa cấu hình"
         })
 
 # --- CÁC API TOGGLE ---
 @app.route("/api/toggle_event_bot", methods=['POST'])
 def toggle_event_bot():
-    # ... (Giữ nguyên toàn bộ nội dung hàm toggle_event_bot)
     global event_bot_thread, is_event_bot_running, is_autoclick_running
     with lock:
         if is_autoclick_running: return jsonify({"status": "error", "message": "Auto Click is running."}), 400
-        is_event_bot_running = not is_event_bot_running
+        
         if is_event_bot_running:
+            is_event_bot_running = False
+            print("[CONTROL] Nhận lệnh DỪNG Bot Event.", flush=True)
+        else:
+            is_event_bot_running = True
+            print("[CONTROL] Nhận lệnh BẬT Bot Event.", flush=True)
             event_bot_thread = threading.Thread(target=run_event_bot_thread, daemon=True); event_bot_thread.start()
+
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
 
 
 @app.route("/api/toggle_autoclick", methods=['POST'])
 def toggle_autoclick():
-    # ... (Giữ nguyên toàn bộ nội dung hàm toggle_autoclick)
     global autoclick_bot_thread, is_autoclick_running, is_event_bot_running, autoclick_button_index, autoclick_count, autoclick_clicks_done, autoclick_target_message_data
     data = request.get_json()
     with lock:
         if is_event_bot_running: return jsonify({"status": "error", "message": "Event Bot is running."}), 400
-        is_autoclick_running = not is_autoclick_running
+        
         if is_autoclick_running:
+             is_autoclick_running = False
+             print("[CONTROL] Nhận lệnh DỪNG Auto Click.", flush=True)
+        else:
+            is_autoclick_running = True
             autoclick_button_index = int(data.get('button_index', 0))
             autoclick_count = int(data.get('count', 1))
             autoclick_clicks_done = 0; autoclick_target_message_data = None
+            print(f"[CONTROL] Nhận lệnh BẬT Auto Click: {autoclick_count or 'vô hạn'} lần vào button {autoclick_button_index}.", flush=True)
             autoclick_bot_thread = threading.Thread(target=run_autoclick_bot_thread, daemon=True); autoclick_bot_thread.start()
+
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
 
 @app.route("/api/toggle_auto_kd", methods=['POST'])
 def toggle_auto_kd():
-    # ... (Giữ nguyên toàn bộ nội dung hàm toggle_auto_kd)
     global auto_kd_thread, is_auto_kd_running
     with lock:
         if not KD_CHANNEL_ID: return jsonify({"status": "error", "message": "Chưa cấu hình KD_CHANNEL_ID."}), 400
-        is_auto_kd_running = not is_auto_kd_running
+        
         if is_auto_kd_running:
+            is_auto_kd_running = False
+            print("[CONTROL] Nhận lệnh DỪNG Auto KD.", flush=True)
+        else:
+            is_auto_kd_running = True
+            print("[CONTROL] Nhận lệnh BẬT Auto KD.", flush=True)
             auto_kd_thread = threading.Thread(target=run_auto_kd_thread, daemon=True); auto_kd_thread.start()
+
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
 
@@ -652,7 +803,6 @@ def toggle_auto_kvi():
 
 @app.route("/api/toggle_hourly_loop", methods=['POST'])
 def toggle_hourly_loop():
-    # ... (Giữ nguyên toàn bộ nội dung hàm toggle_hourly_loop)
     global hourly_loop_thread, is_hourly_loop_enabled, loop_delay_seconds
     data = request.get_json()
     with lock:
@@ -660,6 +810,8 @@ def toggle_hourly_loop():
         loop_delay_seconds = int(data.get('delay', 3600))
         if is_hourly_loop_enabled and (hourly_loop_thread is None or not hourly_loop_thread.is_alive()):
             hourly_loop_thread = threading.Thread(target=run_hourly_loop_thread, daemon=True); hourly_loop_thread.start()
+        
+        print(f"[CONTROL] Vòng lặp {'ĐÃ BẬT' if is_hourly_loop_enabled else 'ĐÃ TẮT'}.", flush=True)
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
 
@@ -667,10 +819,10 @@ def toggle_hourly_loop():
 # ===================================================================
 # API CHO SPAM PANEL
 # ===================================================================
-# ... (Giữ nguyên toàn bộ các hàm API cho Spam Panel)
 @app.route("/api/panels", methods=['GET'])
 def get_panels():
     with lock: return jsonify({"panels": spam_panels})
+
 @app.route("/api/panel/add", methods=['POST'])
 def add_panel():
     global panel_id_counter
@@ -679,6 +831,7 @@ def add_panel():
         spam_panels.append(new_panel); panel_id_counter += 1
         save_result = save_settings()
     return jsonify({"status": "ok", "new_panel": new_panel, "save_status": save_result})
+
 @app.route("/api/panel/update", methods=['POST'])
 def update_panel():
     data = request.get_json()
@@ -689,6 +842,7 @@ def update_panel():
                 panel.update(data); break
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
+
 @app.route("/api/panel/delete", methods=['POST'])
 def delete_panel():
     data = request.get_json()
