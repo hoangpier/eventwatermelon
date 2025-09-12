@@ -216,7 +216,8 @@ def run_kvi_ai_clicker():
     
     @bot.gateway.command
     def on_event(resp):
-        global kvi_session_state
+        # SỬA LỖI 1: Thêm 'global' để hàm có thể truy cập biến toàn cục
+        global is_auto_kvi_running, kvi_session_state
         with lock:
             if not is_auto_kvi_running: bot.gateway.close(); return
         if not (resp.event.message or resp.raw.get("t") == "MESSAGE_UPDATE"): return
@@ -383,7 +384,13 @@ def run_auto_kd_thread():
         m = resp.parsed.auto()
         if (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == KD_CHANNEL_ID):
             content = m.get("content", "").lower()
-            embed_desc = m.get("embeds", [{}])[0].get("description", "").lower()
+            
+            # SỬA LỖI 2: Thêm kiểm tra xem embeds có tồn tại không
+            embed_desc = ""
+            embeds = m.get("embeds", [])
+            if embeds: # Chỉ lấy description nếu danh sách embeds không rỗng
+                embed_desc = embeds[0].get("description", "").lower()
+
             if "blessing has activated!" in content or "blessing has activated!" in embed_desc:
                 print("[AUTO KD] INFO: Phát hiện blessing!", flush=True)
                 time.sleep(random.uniform(1.5, 3.0))
@@ -403,7 +410,6 @@ def run_hourly_loop_thread():
     while True:
         with lock:
             if not is_hourly_loop_enabled: break
-        # Chờ đợi trong N giây, nhưng kiểm tra mỗi giây để có thể dừng ngay lập tức
         for _ in range(loop_delay_seconds):
             if not is_hourly_loop_enabled: break
             time.sleep(1)
@@ -413,7 +419,6 @@ def run_hourly_loop_thread():
                 print(f"\n[HOURLY LOOP] Gửi 'kevent'...", flush=True)
                 event_bot_instance.sendMessage(CHANNEL_ID, "kevent")
             elif not is_event_bot_running: 
-                # Nếu bot event không chạy nữa, vòng lặp cũng nên dừng
                 break 
     with lock: save_settings()
     print("[HOURLY LOOP] Luồng vòng lặp đã dừng.", flush=True)
