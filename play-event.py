@@ -552,7 +552,8 @@ HTML_TEMPLATE = """
         <button class="add-panel-btn" onclick="addPanel()">+ Thêm Bảng Spam</button>
     </div>
     <script>
-        // ... (Giữ nguyên toàn bộ script của bạn)
+        // Script is intentionally left blank for brevity in this example.
+        // The full, correct JavaScript would be included here.
     </script>
 </body>
 </html>
