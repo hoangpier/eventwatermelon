@@ -1,4 +1,7 @@
-python-dotenv
 discum
-flask
 requests
+Flask
+python-dotenv
+google-generativeai
+gunicorn
+gevent
