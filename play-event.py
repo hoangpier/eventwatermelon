@@ -232,7 +232,9 @@ def run_kvi_ai_clicker():
                 if robust_click_button(bot, m, talk_button['custom_id'], "KVI-AI"):
                     kvi_session_state["step"] = "waiting_for_question"
                 else:
-                    with lock: is_auto_kvi_running = False; save_settings()
+                    with lock:
+                        is_auto_kvi_running = False
+                        save_settings()
             return
 
         if resp.raw.get("t") == "MESSAGE_UPDATE" and m.get("id") == kvi_session_state["message_id"]:
@@ -247,13 +249,21 @@ def run_kvi_ai_clicker():
                         if robust_click_button(bot, m, buttons[choice_idx]['custom_id'], "KVI-AI"):
                             kvi_session_state["step"] = "answered"
                             time.sleep(3)
-                        else: with lock: is_auto_kvi_running = False; save_settings()
-                    else: with lock: is_auto_kvi_running = False; save_settings()
+                        else:
+                            with lock:
+                                is_auto_kvi_running = False
+                                save_settings()
+                    else:
+                        with lock:
+                            is_auto_kvi_running = False
+                            save_settings()
                 return
 
             if kvi_session_state["step"] == "answered":
                 print("[KVI-AI] Hết lượt, dừng...", flush=True)
-                with lock: is_auto_kvi_running = False; save_settings()
+                with lock:
+                    is_auto_kvi_running = False
+                    save_settings()
 
     @bot.gateway.command
     def on_ready(resp):
@@ -301,7 +311,7 @@ def run_event_bot_thread():
         found_good_move = "If placed here, you will receive the following fruit:" in embed_desc
         has_received_fruit = "You received the following fruit:" in embed_desc
         if is_final_confirm_phase:
-            with lock: action_queue.clear() 
+            with lock: action_queue.clear()
             threading.Thread(target=perform_final_confirmation, args=(m,)).start()
         elif has_received_fruit:
             threading.Thread(target=click_button_by_index, args=(bot, m, 0, "EVENT BOT")).start()
@@ -415,7 +425,7 @@ def spam_loop():
     def on_ready(resp):
         if resp.event.ready: print("[SPAM BOT] Gateway đã kết nối.", flush=True)
     threading.Thread(target=bot.gateway.run, daemon=True).start()
-    time.sleep(5) 
+    time.sleep(5)
     while True:
         with lock: panels_to_process = list(spam_panels)
         for panel in panels_to_process:
