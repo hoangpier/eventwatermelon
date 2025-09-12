@@ -7,23 +7,9 @@ import requests
 import os
 import sys
 import re
-import logging
 from collections import deque
 from flask import Flask, jsonify, render_template_string, request
 from dotenv import load_dotenv
-
-# ===================================================================
-# THIẾT LẬP LOGGING
-# ===================================================================
-# Cấu hình để log ra cả file 'bot.log' và console (màn hình terminal)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("bot.log", encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
 
 # --- THƯ VIỆN CỦA GEMINI ---
 import google.generativeai as genai
@@ -37,45 +23,51 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 KD_CHANNEL_ID = os.getenv("KD_CHANNEL_ID")
-KVI_CHANNEL_ID = os.getenv("KVI_CHANNEL_ID")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+KVI_CHANNEL_ID = os.getenv("KVI_CHANNEL_ID") # MỚI
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") # MỚI
 JSONBIN_API_KEY = os.getenv("JSONBIN_API_KEY")
 JSONBIN_BIN_ID = os.getenv("JSONBIN_BIN_ID")
 KARUTA_ID = "646937666251915264"
 
 # --- Kiểm tra biến môi trường ---
 if not TOKEN:
-    logging.error("LỖI: Vui lòng cung cấp DISCORD_TOKEN trong biến môi trường."); sys.exit(1)
+    print("LỖI: Vui lòng cung cấp DISCORD_TOKEN trong biến môi trường.", flush=True); sys.exit(1)
 if not CHANNEL_ID:
-    logging.error("LỖI: Vui lòng cung cấp CHANNEL_ID trong biến môi trường."); sys.exit(1)
+    print("LỖI: Vui lòng cung cấp CHANNEL_ID trong biến môi trường.", flush=True); sys.exit(1)
 if not KD_CHANNEL_ID:
-    logging.warning("CẢNH BÁO: KD_CHANNEL_ID chưa được cấu hình. Tính năng Auto KD sẽ không khả dụng.")
+    print("CẢNH BÁO: KD_CHANNEL_ID chưa được cấu hình. Tính năng Auto KD sẽ không khả dụng.", flush=True)
 if not KVI_CHANNEL_ID:
-    logging.warning("CẢNH BÁO: KVI_CHANNEL_ID chưa được cấu hình. Tính năng Auto KVI sẽ không khả dụng.")
+    print("CẢNH BÁO: KVI_CHANNEL_ID chưa được cấu hình. Tính năng Auto KVI sẽ không khả dụng.", flush=True)
 if not GEMINI_API_KEY:
-    logging.warning("CẢNH BÁO: GEMINI_API_KEY chưa được cấu hình. Tính năng Auto KVI sẽ không khả dụng.")
+    print("CẢNH BÁO: GEMINI_API_KEY chưa được cấu hình. Tính năng Auto KVI sẽ không khả dụng.", flush=True)
 else:
     genai.configure(api_key=GEMINI_API_KEY)
-    logging.info("[GEMINI] Đã cấu hình API key thành công.")
+    print("[GEMINI] Đã cấu hình API key thành công.", flush=True)
 
 
 # --- Các biến trạng thái và điều khiển ---
 lock = threading.RLock()
+
+# Các biến trạng thái chạy (sẽ được load từ JSON)
 is_event_bot_running = False
 is_autoclick_running = False
 is_auto_kd_running = False
-is_auto_kvi_running = False
+is_auto_kvi_running = False # MỚI
+
+# Các biến cài đặt (sẽ được load từ JSON)
 is_hourly_loop_enabled = False
 loop_delay_seconds = 3600
 spam_panels = []
 panel_id_counter = 0
+
+# Các biến runtime khác
 event_bot_thread, event_bot_instance = None, None
 hourly_loop_thread = None
 autoclick_bot_thread, autoclick_bot_instance = None, None
 autoclick_button_index, autoclick_count, autoclick_clicks_done, autoclick_target_message_data = 0, 0, 0, None
 auto_kd_thread, auto_kd_instance = None, None
-auto_kvi_thread, auto_kvi_instance = None, None
-kvi_session_state = {"step": "initial", "message_id": None}
+auto_kvi_thread, auto_kvi_instance = None, None # MỚI
+kvi_session_state = {"step": "initial", "message_id": None} # MỚI
 spam_thread = None
 
 # ===================================================================
@@ -83,16 +75,23 @@ spam_thread = None
 # ===================================================================
 
 def save_settings():
+    """Lưu tất cả cài đặt và trạng thái lên JSONBin.io"""
     with lock:
         if not JSONBIN_API_KEY or not JSONBIN_BIN_ID:
-            logging.warning("[SETTINGS] Thiếu API Key hoặc Bin ID, không thể lưu cài đặt.")
+            print("[SETTINGS] WARN: Thiếu API Key hoặc Bin ID, không thể lưu cài đặt.", flush=True)
             return False
+
         settings_to_save = {
-            'is_event_bot_running': is_event_bot_running, 'is_auto_kd_running': is_auto_kd_running,
-            'is_autoclick_running': is_autoclick_running, 'is_auto_kvi_running': is_auto_kvi_running,
-            'is_hourly_loop_enabled': is_hourly_loop_enabled, 'loop_delay_seconds': loop_delay_seconds,
-            'spam_panels': spam_panels, 'panel_id_counter': panel_id_counter,
-            'autoclick_button_index': autoclick_button_index, 'autoclick_count': autoclick_count,
+            'is_event_bot_running': is_event_bot_running,
+            'is_auto_kd_running': is_auto_kd_running,
+            'is_autoclick_running': is_autoclick_running,
+            'is_auto_kvi_running': is_auto_kvi_running, # MỚI
+            'is_hourly_loop_enabled': is_hourly_loop_enabled,
+            'loop_delay_seconds': loop_delay_seconds,
+            'spam_panels': spam_panels,
+            'panel_id_counter': panel_id_counter,
+            'autoclick_button_index': autoclick_button_index,
+            'autoclick_count': autoclick_count,
             'autoclick_clicks_done': autoclick_clicks_done
         }
         headers = {'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY}
@@ -100,16 +99,14 @@ def save_settings():
         try:
             req = requests.put(url, json=settings_to_save, headers=headers, timeout=15)
             if req.status_code == 200:
-                logging.info("[SETTINGS] Đã lưu cài đặt lên JSONBin.io thành công.")
-                return True
+                print("[SETTINGS] INFO: Đã lưu cài đặt lên JSONBin.io thành công.", flush=True); return True
             else:
-                logging.error(f"[SETTINGS] Lỗi khi lưu cài đặt: {req.status_code} - {req.text}")
-                return False
+                print(f"[SETTINGS] LỖI: Lỗi khi lưu cài đặt: {req.status_code} - {req.text}", flush=True); return False
         except Exception as e:
-            logging.error(f"[SETTINGS] Exception khi lưu cài đặt: {e}")
-            return False
+            print(f"[SETTINGS] LỖI NGOẠI LỆ: Exception khi lưu cài đặt: {e}", flush=True); return False
 
 def load_settings():
+    """Tải cài đặt từ JSONBin.io khi khởi động"""
     global is_event_bot_running, is_auto_kd_running, is_autoclick_running, is_auto_kvi_running
     global is_hourly_loop_enabled, loop_delay_seconds, spam_panels, panel_id_counter
     global autoclick_button_index, autoclick_count, autoclick_clicks_done
@@ -121,11 +118,11 @@ def load_settings():
             req = requests.get(url, headers=headers, timeout=15)
             if req.status_code == 200:
                 settings = req.json()
-                if isinstance(settings, dict):
+                if settings and isinstance(settings, dict):
                     is_event_bot_running = settings.get('is_event_bot_running', False)
                     is_auto_kd_running = settings.get('is_auto_kd_running', False)
                     is_autoclick_running = settings.get('is_autoclick_running', False)
-                    is_auto_kvi_running = settings.get('is_auto_kvi_running', False)
+                    is_auto_kvi_running = settings.get('is_auto_kvi_running', False) # MỚI
                     is_hourly_loop_enabled = settings.get('is_hourly_loop_enabled', False)
                     loop_delay_seconds = settings.get('loop_delay_seconds', 3600)
                     spam_panels = settings.get('spam_panels', [])
@@ -136,12 +133,12 @@ def load_settings():
                     if spam_panels:
                         max_id = max(p.get('id', -1) for p in spam_panels)
                         panel_id_counter = max(panel_id_counter, max_id + 1)
-                    logging.info("[SETTINGS] Đã tải cài đặt từ JSONBin.io thành công.")
-                    logging.info(f"[SETTINGS] Trạng thái tải: Event Bot: {is_event_bot_running}, Auto KD: {is_auto_kd_running}, Auto Click: {is_autoclick_running}, Auto KVI: {is_auto_kvi_running}")
+                    print("[SETTINGS] INFO: Đã tải cài đặt từ JSONBin.io thành công.", flush=True)
+                    print(f"[SETTINGS] INFO: Event Bot: {is_event_bot_running}, Auto KD: {is_auto_kd_running}, Auto Click: {is_autoclick_running}, Auto KVI: {is_auto_kvi_running}", flush=True)
                     return True
             return False
         except Exception as e:
-            logging.error(f"[SETTINGS] Exception khi tải cài đặt: {e}.")
+            print(f"[SETTINGS] LỖI NGOẠI LỆ: Exception khi tải cài đặt: {e}.", flush=True)
             return False
 
 # ===================================================================
@@ -151,8 +148,7 @@ def load_settings():
 def robust_click_button(bot, message_data, custom_id, source=""):
     try:
         if not bot or not bot.gateway.session_id:
-            logging.error(f"[{source}] Bot chưa kết nối.")
-            return False
+            print(f"[{source}] LỖI: Bot chưa kết nối.", flush=True); return False
         headers, max_retries = {"Authorization": TOKEN}, 15
         payload_base = {"type": 3, "guild_id": message_data.get("guild_id"), "channel_id": message_data.get("channel_id"), "message_id": message_data.get("id"), "application_id": message_data.get("application_id", KARUTA_ID), "data": {"component_type": 2, "custom_id": custom_id}}
         for attempt in range(max_retries):
@@ -160,37 +156,30 @@ def robust_click_button(bot, message_data, custom_id, source=""):
             try:
                 r = requests.post("https://discord.com/api/v9/interactions", headers=headers, json=payload, timeout=10)
                 if 200 <= r.status_code < 300:
-                    logging.info(f"[{source}] Click thành công nút '{custom_id}'!")
-                    return True
+                    print(f"[{source}] INFO: Click thành công nút '{custom_id}'!", flush=True); return True
                 elif r.status_code == 429:
                     retry_after = r.json().get("retry_after", 1.5)
-                    logging.warning(f"[{source}] Rate limit! Thử lại sau {retry_after:.2f}s...")
-                    time.sleep(retry_after)
+                    print(f"[{source}] WARN: Rate limit! Thử lại sau {retry_after:.2f}s...", flush=True); time.sleep(retry_after)
                 else:
-                    logging.error(f"[{source}] (Lần {attempt + 1}) Click thất bại! (Status: {r.status_code})")
-                    time.sleep(2)
+                    print(f"[{source}] LỖI (Lần {attempt + 1}): Click thất bại! (Status: {r.status_code})", flush=True); time.sleep(2)
             except requests.exceptions.RequestException as e:
-                logging.error(f"[{source}] LỖI KẾT NỐI (Lần {attempt + 1}): {e}. Thử lại sau 3s...")
-                time.sleep(3)
-        logging.critical(f"[{source}] Đã thử click {max_retries} lần không thành công.")
-        return False
+                print(f"[{source}] LỖI KẾT NỐI (Lần {attempt + 1}): {e}. Thử lại sau 3s...", flush=True); time.sleep(3)
+        print(f"[{source}] LỖI NGHIÊM TRỌNG: Đã thử click {max_retries} lần không thành công.", flush=True); return False
     except Exception as e:
-        logging.error(f"[{source}] Exception trong robust_click_button: {e}")
-        return False
+        print(f"[{source}] LỖI NGOẠI LỆ: {e}", flush=True); return False
 
 def click_button_by_index(bot, message_data, index, source=""):
     try:
         rows = [comp['components'] for comp in message_data.get('components', []) if 'components' in comp]
         all_buttons = [button for row in rows for button in row]
         if index >= len(all_buttons):
-            logging.error(f"[{source}] Không tìm thấy button ở vị trí {index}")
-            return False
+            print(f"[{source}] LỖI: Không tìm thấy button ở vị trí {index}", flush=True); return False
         button_to_click = all_buttons[index]
         return robust_click_button(bot, message_data, button_to_click.get("custom_id"), source)
     except Exception as e:
-        logging.error(f"[{source}] Exception trong click_button_by_index: {e}")
-        return False
+        print(f"[{source}] LỖI NGOẠI LỆ trong hàm click by index: {e}", flush=True); return False
 
+# --- CÁC HÀM CHO KVI (MỚI) ---
 def parse_kvi_embed_data(embed):
     try:
         description = embed.get("description", "")
@@ -208,16 +197,14 @@ def get_gemini_answer(character_name, question, options):
         model = genai.GenerativeModel('gemini-1.5-flash')
         options_text = "\n".join(options)
         prompt = f'You are an expert in the Karuta Discord game. Your task is to choose the best response to impress a character. Character Name: "{character_name}". Question: "{question}". Options:\n{options_text}\nRespond with ONLY the single digit of the best option.'
-        logging.info("[GEMINI] Đang gửi yêu cầu đến AI...")
+        print("[GEMINI] Đang gửi yêu cầu đến AI...", flush=True)
         response = model.generate_content(prompt)
         match = re.search(r'\d', response.text.strip())
         if match:
-            logging.info(f"[GEMINI] AI đã chọn đáp án: {match.group(0)}")
-            return match.group(0)
+            print(f"[GEMINI] AI đã chọn đáp án: {match.group(0)}", flush=True); return match.group(0)
         return "1"
     except Exception as e:
-        logging.error(f"[GEMINI] Lỗi khi gọi API: {e}. Chọn đáp án 1.")
-        return "1"
+        print(f"[GEMINI] Lỗi khi gọi API: {e}. Chọn đáp án 1.", flush=True); return "1"
 
 def run_kvi_ai_clicker():
     global is_auto_kvi_running, auto_kvi_instance, kvi_session_state
@@ -229,6 +216,7 @@ def run_kvi_ai_clicker():
     
     @bot.gateway.command
     def on_event(resp):
+        # SỬA LỖI 1: Thêm 'global' để hàm có thể truy cập biến toàn cục
         global is_auto_kvi_running, kvi_session_state
         with lock:
             if not is_auto_kvi_running: bot.gateway.close(); return
@@ -240,20 +228,21 @@ def run_kvi_ai_clicker():
             buttons = m.get("components", [{}])[0].get("components", [])
             talk_button = next((btn for btn in buttons if btn.get("label", "").lower() == "talk"), None)
             if talk_button:
-                logging.info("[KVI-AI] Nhấn nút 'Talk'...")
+                print("[KVI-AI] Nhấn nút 'Talk'...", flush=True)
                 kvi_session_state["message_id"] = m.get("id")
                 if robust_click_button(bot, m, talk_button['custom_id'], "KVI-AI"):
                     kvi_session_state["step"] = "waiting_for_question"
                 else:
-                    with lock: is_auto_kvi_running = False; save_settings()
+                    with lock:
+                        is_auto_kvi_running = False
+                        save_settings()
             return
 
         if resp.raw.get("t") == "MESSAGE_UPDATE" and m.get("id") == kvi_session_state["message_id"]:
             if kvi_session_state["step"] == "waiting_for_question":
-                if not m.get("embeds"): return
                 name, q, opts = parse_kvi_embed_data(m["embeds"][0])
                 if q and opts:
-                    logging.info("[KVI-AI] Đã nhận câu hỏi, gọi AI...")
+                    print("[KVI-AI] Đã nhận câu hỏi, gọi AI...", flush=True)
                     kvi_session_state["step"] = "processing"
                     choice_idx = int(get_gemini_answer(name, q, opts)) - 1
                     buttons = m["components"][0]["components"]
@@ -262,28 +251,36 @@ def run_kvi_ai_clicker():
                             kvi_session_state["step"] = "answered"
                             time.sleep(3)
                         else:
-                            with lock: is_auto_kvi_running = False; save_settings()
+                            with lock:
+                                is_auto_kvi_running = False
+                                save_settings()
                     else:
-                        with lock: is_auto_kvi_running = False; save_settings()
+                        with lock:
+                            is_auto_kvi_running = False
+                            save_settings()
                 return
 
             if kvi_session_state["step"] == "answered":
-                logging.info("[KVI-AI] Hết lượt, dừng...")
-                with lock: is_auto_kvi_running = False; save_settings()
+                print("[KVI-AI] Hết lượt, dừng...", flush=True)
+                with lock:
+                    is_auto_kvi_running = False
+                    save_settings()
 
     @bot.gateway.command
     def on_ready(resp):
         if resp.event.ready:
-             logging.info("[KVI-AI] Gateway sẵn sàng. Gửi 'kvi'...")
+             print("[KVI-AI] Gateway sẵn sàng. Gửi 'kvi'...", flush=True)
              bot.sendMessage(KVI_CHANNEL_ID, "kvi")
     
-    logging.info("[KVI-AI] Luồng Auto KVI đã khởi động...")
+    print("[KVI-AI] Luồng Auto KVI đã khởi động...", flush=True)
     try: bot.gateway.run(auto_reconnect=True)
-    except Exception as e: logging.error(f"[KVI-AI] Gateway bị lỗi: {e}")
+    except Exception as e: print(f"[KVI-AI] LỖI: Gateway bị lỗi: {e}", flush=True)
     finally:
         with lock: is_auto_kvi_running = False; auto_kvi_instance = None; save_settings()
-        logging.info("[KVI-AI] Luồng Auto KVI đã dừng.")
+        print("[KVI-AI] Luồng Auto KVI đã dừng.", flush=True)
 
+
+# --- CÁC HÀM LOGIC GỐC ---
 def run_event_bot_thread():
     global is_event_bot_running, event_bot_instance
     active_message_id = None
@@ -291,10 +288,9 @@ def run_event_bot_thread():
     bot = discum.Client(token=TOKEN, log=False)
     with lock: event_bot_instance = bot
     def perform_final_confirmation(message_data):
-        logging.info("[EVENT BOT] Chờ 2s cho nút cuối...")
-        time.sleep(2)
+        print("[EVENT BOT] ACTION: Chờ 2s cho nút cuối...", flush=True); time.sleep(2)
         click_button_by_index(bot, message_data, 2, "EVENT BOT")
-        logging.info("[EVENT BOT] Hoàn thành lượt.")
+        print("[EVENT BOT] INFO: Hoàn thành lượt.", flush=True)
     @bot.gateway.command
     def on_message(resp):
         nonlocal active_message_id, action_queue
@@ -306,7 +302,7 @@ def run_event_bot_thread():
         with lock:
             if resp.event.message and "Takumi's Solisfair Stand" in m.get("embeds", [{}])[0].get("title", ""):
                 active_message_id = m.get("id"); action_queue.clear()
-                logging.info(f"[EVENT BOT] Phát hiện game mới. ID: {active_message_id}")
+                print(f"\n[EVENT BOT] INFO: Phát hiện game mới. ID: {active_message_id}", flush=True)
             if m.get("id") != active_message_id: return
         embed_desc = m.get("embeds", [{}])[0].get("description", "")
         all_buttons_flat = [b for row in m.get('components', []) for b in row.get('components', []) if row.get('type') == 1]
@@ -322,10 +318,10 @@ def run_event_bot_thread():
         elif is_movement_phase:
             with lock:
                 if found_good_move:
-                    logging.info("[EVENT BOT] NGẮT QUÃNG - Phát hiện nước đi tốt.")
+                    print("[EVENT BOT] INFO: NGẮT QUÃNG - Phát hiện nước đi tốt.", flush=True)
                     action_queue.clear(); action_queue.append(0)
                 elif not action_queue:
-                    logging.info("[EVENT BOT] Tạo chuỗi hành động...")
+                    print("[EVENT BOT] INFO: Tạo chuỗi hành động...", flush=True)
                     action_queue.extend([1, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 1, 1, 1, 1, 2, 2, 3, 3])
                     action_queue.extend([random.choice([1,2,3,4]) for _ in range(random.randint(4, 12))]); action_queue.append(0)
                 if action_queue:
@@ -333,12 +329,12 @@ def run_event_bot_thread():
     @bot.gateway.command
     def on_ready(resp):
         if resp.event.ready_supplemental:
-            logging.info("[EVENT BOT] Gateway sẵn sàng. Gửi 'kevent'...")
+            print("[EVENT BOT] Gateway sẵn sàng. Gửi 'kevent'...", flush=True)
             bot.sendMessage(CHANNEL_ID, "kevent")
     try: bot.gateway.run(auto_reconnect=True)
     finally:
         with lock: is_event_bot_running = False; save_settings()
-        logging.info("[EVENT BOT] Luồng bot sự kiện đã dừng.")
+        print("[EVENT BOT] Luồng bot sự kiện đã dừng.", flush=True)
 
 def run_autoclick_bot_thread():
     global is_autoclick_running, autoclick_bot_instance, autoclick_clicks_done, autoclick_target_message_data
@@ -353,10 +349,10 @@ def run_autoclick_bot_thread():
             m = resp.parsed.auto()
             if (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == CHANNEL_ID and "Takumi's Solisfair Stand" in m.get("embeds", [{}])[0].get("title", "")):
                 with lock: autoclick_target_message_data = m
-                logging.info(f"[AUTO CLICK] Đã cập nhật tin nhắn game. ID: {m.get('id')}")
+                print(f"[AUTO CLICK] INFO: Đã cập nhật tin nhắn game. ID: {m.get('id')}", flush=True)
     @bot.gateway.command
     def on_ready(resp):
-        if resp.event.ready: logging.info("[AUTO CLICK] Gateway sẵn sàng. Đang chờ 'kevent'...")
+        if resp.event.ready: print("[AUTO CLICK] Gateway sẵn sàng. Đang chờ 'kevent'...", flush=True)
     threading.Thread(target=bot.gateway.run, daemon=True, name="AutoClickGatewayThread").start()
     try:
         while True:
@@ -371,7 +367,8 @@ def run_autoclick_bot_thread():
             else: time.sleep(5)
     finally:
         with lock: is_autoclick_running = False; autoclick_bot_instance = None; save_settings()
-        logging.info("[AUTO CLICK] Luồng auto click đã dừng.")
+        print("[AUTO CLICK] Luồng auto click đã dừng.", flush=True)
+
 
 def run_auto_kd_thread():
     global is_auto_kd_running, auto_kd_instance
@@ -387,22 +384,26 @@ def run_auto_kd_thread():
         m = resp.parsed.auto()
         if (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == KD_CHANNEL_ID):
             content = m.get("content", "").lower()
+            
+            # SỬA LỖI 2: Thêm kiểm tra xem embeds có tồn tại không
             embed_desc = ""
             embeds = m.get("embeds", [])
-            if embeds:
+            if embeds: # Chỉ lấy description nếu danh sách embeds không rỗng
                 embed_desc = embeds[0].get("description", "").lower()
+
             if "blessing has activated!" in content or "blessing has activated!" in embed_desc:
-                logging.info("[AUTO KD] Phát hiện blessing!")
+                print("[AUTO KD] INFO: Phát hiện blessing!", flush=True)
                 time.sleep(random.uniform(1.5, 3.0))
-                try: bot.sendMessage(KD_CHANNEL_ID, "kd"); logging.info("[AUTO KD] Đã gửi kd.")
-                except Exception as e: logging.error(f"[AUTO KD] Không thể gửi kd. {e}")
+                try: bot.sendMessage(KD_CHANNEL_ID, "kd"); print("[AUTO KD] SUCCESS: Đã gửi kd.", flush=True)
+                except Exception as e: print(f"[AUTO KD] LỖI: Không thể gửi kd. {e}", flush=True)
     @bot.gateway.command
     def on_ready(resp):
-        if resp.event.ready: logging.info(f"[AUTO KD] Gateway sẵn sàng. Theo dõi kênh {KD_CHANNEL_ID}...")
+        if resp.event.ready: print(f"[AUTO KD] Gateway sẵn sàng. Theo dõi kênh {KD_CHANNEL_ID}...", flush=True)
     try: bot.gateway.run(auto_reconnect=True)
     finally:
         with lock: is_auto_kd_running = False; auto_kd_instance = None; save_settings()
-        logging.info("[AUTO KD] Luồng Auto KD đã dừng.")
+        print("[AUTO KD] Luồng Auto KD đã dừng.", flush=True)
+
 
 def run_hourly_loop_thread():
     global is_hourly_loop_enabled, loop_delay_seconds
@@ -412,19 +413,22 @@ def run_hourly_loop_thread():
         for _ in range(loop_delay_seconds):
             if not is_hourly_loop_enabled: break
             time.sleep(1)
+        
         with lock:
             if is_hourly_loop_enabled and event_bot_instance and is_event_bot_running:
-                logging.info(f"[HOURLY LOOP] Gửi 'kevent'...")
+                print(f"\n[HOURLY LOOP] Gửi 'kevent'...", flush=True)
                 event_bot_instance.sendMessage(CHANNEL_ID, "kevent")
-            elif not is_event_bot_running: break 
+            elif not is_event_bot_running: 
+                break 
     with lock: save_settings()
-    logging.info("[HOURLY LOOP] Luồng vòng lặp đã dừng.")
+    print("[HOURLY LOOP] Luồng vòng lặp đã dừng.", flush=True)
+
 
 def spam_loop():
     bot = discum.Client(token=TOKEN, log=False)
     @bot.gateway.command
     def on_ready(resp):
-        if resp.event.ready: logging.info("[SPAM BOT] Gateway đã kết nối.")
+        if resp.event.ready: print("[SPAM BOT] Gateway đã kết nối.", flush=True)
     threading.Thread(target=bot.gateway.run, daemon=True).start()
     time.sleep(5) 
     while True:
@@ -438,8 +442,9 @@ def spam_loop():
                             for p in spam_panels:
                                 if p['id'] == panel['id']: p['last_spam_time'] = time.time(); break
                             save_settings()
-                    except Exception as e: logging.error(f"LỖI SPAM: {e}")
+                    except Exception as e: print(f"LỖI SPAM: {e}", flush=True)
         time.sleep(1)
+
 
 # ===================================================================
 # HÀM KHỞI ĐỘNG LẠI BOT THEO TRẠNG THÁI ĐÃ LƯU
@@ -447,19 +452,19 @@ def spam_loop():
 def restore_bot_states():
     global event_bot_thread, auto_kd_thread, autoclick_bot_thread, hourly_loop_thread, auto_kvi_thread
     if is_event_bot_running:
-        logging.info("[RESTORE] Khôi phục Event Bot...")
+        print("[RESTORE] Khôi phục Event Bot...", flush=True)
         event_bot_thread = threading.Thread(target=run_event_bot_thread, daemon=True); event_bot_thread.start()
     if is_auto_kd_running and KD_CHANNEL_ID:
-        logging.info("[RESTORE] Khôi phục Auto KD...")
+        print("[RESTORE] Khôi phục Auto KD...", flush=True)
         auto_kd_thread = threading.Thread(target=run_auto_kd_thread, daemon=True); auto_kd_thread.start()
     if is_autoclick_running:
-        logging.info("[RESTORE] Khôi phục Auto Click...")
+        print("[RESTORE] Khôi phục Auto Click...", flush=True)
         autoclick_bot_thread = threading.Thread(target=run_autoclick_bot_thread, daemon=True); autoclick_bot_thread.start()
-    if is_auto_kvi_running and KVI_CHANNEL_ID and GEMINI_API_KEY:
-        logging.info("[RESTORE] Khôi phục Auto KVI...")
+    if is_auto_kvi_running and KVI_CHANNEL_ID and GEMINI_API_KEY: # MỚI
+        print("[RESTORE] Khôi phục Auto KVI...", flush=True)
         auto_kvi_thread = threading.Thread(target=run_kvi_ai_clicker, daemon=True); auto_kvi_thread.start()
     if is_hourly_loop_enabled:
-        logging.info("[RESTORE] Khôi phục Hourly Loop...")
+        print("[RESTORE] Khôi phục Hourly Loop...", flush=True)
         hourly_loop_thread = threading.Thread(target=run_hourly_loop_thread, daemon=True); hourly_loop_thread.start()
 
 # ===================================================================
@@ -498,15 +503,11 @@ HTML_TEMPLATE = """
         .save-success { background-color: #03dac6; color: #121212; }
         .save-error { background-color: #cf6679; color: #fff; }
         .channel-display { font-size:0.8em; color:#666; margin:10px 0; }
-        .log-link { margin-bottom: 20px; font-size: 1.1em; }
-        .log-link a { color: #03dac6; text-decoration: none; border: 1px solid #03dac6; padding: 8px 15px; border-radius: 5px; transition: all 0.3s; }
-        .log-link a:hover { background-color: rgba(3, 218, 198, 0.1); }
     </style>
 </head>
 <body>
     <div id="saveStatus" class="save-status"></div>
     <h1>Karuta Bot Control</h1>
-    <div class="log-link"><a href="/logs" target="_blank">Xem Logs của Bot</a></div>
     <p>Chọn một chế độ để chạy. Các chế độ Event và AutoClick không thể chạy cùng lúc.</p>
     <div class="container">
         <div class="panel" id="event-bot-panel">
@@ -552,8 +553,158 @@ HTML_TEMPLATE = """
         <button class="add-panel-btn" onclick="addPanel()">+ Thêm Bảng Spam</button>
     </div>
     <script>
-        // Script is intentionally left blank for brevity in this example.
-        // The full, correct JavaScript would be included here.
+        function showSaveStatus(message, isSuccess) {
+            const status = document.getElementById('saveStatus');
+            status.textContent = message;
+            status.className = 'save-status ' + (isSuccess ? 'save-success' : 'save-error');
+            status.style.display = 'block';
+            setTimeout(() => status.style.display = 'none', 3000);
+        }
+        
+        async function apiCall(endpoint, method = 'POST', body = null) {
+            const options = { method, headers: {'Content-Type': 'application/json'} };
+            if (body) options.body = JSON.stringify(body);
+            try {
+                const response = await fetch(endpoint, options);
+                const result = await response.json();
+                if (result.save_status !== undefined) {
+                    showSaveStatus(result.save_status ? 'Đã lưu thành công' : 'Lỗi khi lưu', result.save_status);
+                }
+                return result;
+            } catch (error) { 
+                console.error('API call failed:', error); 
+                showSaveStatus('Lỗi kết nối', false);
+                return { error: 'API call failed' }; 
+            }
+        }
+        
+        async function fetchStatus() {
+            const data = await apiCall('/api/status', 'GET');
+            if (data.error) { 
+                document.getElementById('event-bot-status').textContent = 'Lỗi kết nối server.'; 
+                return; 
+            }
+            
+            // Event Bot Panel
+            const eventBotStatusDiv = document.getElementById('event-bot-status'), toggleEventBotBtn = document.getElementById('toggleEventBotBtn');
+            eventBotStatusDiv.textContent = data.is_event_bot_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
+            eventBotStatusDiv.className = data.is_event_bot_running ? 'status status-on' : 'status status-off';
+            toggleEventBotBtn.textContent = data.is_event_bot_running ? 'Dừng Auto Play' : 'Bật Auto Play';
+            toggleEventBotBtn.disabled = data.is_autoclick_running;
+            document.getElementById('event-bot-panel').classList.toggle('active-mode', data.is_event_bot_running);
+
+            // Autoclick Panel
+            const autoclickStatusDiv = document.getElementById('autoclick-status'), toggleAutoclickBtn = document.getElementById('toggleAutoclickBtn');
+            const countText = data.autoclick_count > 0 ? `${data.autoclick_clicks_done}/${data.autoclick_count}` : `${data.autoclick_clicks_done}/∞`;
+            autoclickStatusDiv.textContent = data.is_autoclick_running ? `Trạng thái: ĐANG CHẠY (${countText})` : 'Trạng thái: ĐÃ DỪNG';
+            autoclickStatusDiv.className = data.is_autoclick_running ? 'status status-on' : 'status status-off';
+            toggleAutoclickBtn.textContent = data.is_autoclick_running ? 'Dừng Auto Click' : 'Bật Auto Click';
+            document.getElementById('autoclick-button-index').disabled = data.is_autoclick_running;
+            document.getElementById('autoclick-count').disabled = data.is_autoclick_running;
+            toggleAutoclickBtn.disabled = data.is_event_bot_running;
+            document.getElementById('autoclick-panel').classList.toggle('active-mode', data.is_autoclick_running);
+
+            // Auto KD Panel
+            document.getElementById('auto-kd-status').textContent = data.is_auto_kd_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
+            document.getElementById('auto-kd-status').className = data.is_auto_kd_running ? 'status status-on' : 'status status-off';
+            document.getElementById('toggleAutoKdBtn').textContent = data.is_auto_kd_running ? 'Dừng Auto KD' : 'Bật Auto KD';
+            document.getElementById('auto-kd-panel').classList.toggle('active-mode', data.is_auto_kd_running);
+            document.getElementById('kd-channel-display').textContent = data.kd_channel_id;
+            
+            // Auto KVI Panel
+            const autoKviStatusDiv = document.getElementById('auto-kvi-status'), toggleAutoKviBtn = document.getElementById('toggleAutoKviBtn');
+            autoKviStatusDiv.textContent = data.is_auto_kvi_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
+            autoKviStatusDiv.className = data.is_auto_kvi_running ? 'status status-on' : 'status status-off';
+            toggleAutoKviBtn.textContent = data.is_auto_kvi_running ? 'Dừng Auto KVI' : 'Bật Auto KVI';
+            document.getElementById('auto-kvi-panel').classList.toggle('active-mode', data.is_auto_kvi_running);
+            document.getElementById('kvi-channel-display').textContent = data.kvi_channel_id;
+
+            // Loop Panel
+            const loopStatusDiv = document.getElementById('loop-status'), toggleLoopBtn = document.getElementById('toggleLoopBtn');
+            loopStatusDiv.textContent = data.is_hourly_loop_enabled ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
+            loopStatusDiv.className = data.is_hourly_loop_enabled ? 'status status-on' : 'status status-off';
+            toggleLoopBtn.textContent = data.is_hourly_loop_enabled ? 'TẮT VÒNG LẶP' : 'BẬT VÒNG LẶP';
+            toggleLoopBtn.disabled = !data.is_event_bot_running && !data.is_hourly_loop_enabled;
+            document.getElementById('delay-input').value = data.loop_delay_seconds;
+        }
+        
+        document.getElementById('toggleEventBotBtn').addEventListener('click', () => apiCall('/api/toggle_event_bot').then(fetchStatus));
+        document.getElementById('toggleAutoclickBtn').addEventListener('click', () => {
+            apiCall('/api/toggle_autoclick', 'POST', { 
+                button_index: parseInt(document.getElementById('autoclick-button-index').value, 10), 
+                count: parseInt(document.getElementById('autoclick-count').value, 10) 
+            }).then(fetchStatus);
+        });
+        document.getElementById('toggleAutoKdBtn').addEventListener('click', () => apiCall('/api/toggle_auto_kd').then(fetchStatus));
+        document.getElementById('toggleAutoKviBtn').addEventListener('click', () => apiCall('/api/toggle_auto_kvi').then(fetchStatus));
+        document.getElementById('toggleLoopBtn').addEventListener('click', () => {
+            const isEnabled = !document.getElementById('loop-status').textContent.includes('ĐANG CHẠY');
+            apiCall('/api/toggle_hourly_loop', 'POST', { 
+                enabled: isEnabled, 
+                delay: parseInt(document.getElementById('delay-input').value, 10) 
+            }).then(fetchStatus);
+        });
+        
+        function createPanelElement(panel) {
+            const div = document.createElement('div');
+            div.className = `spam-panel ${panel.is_active ? 'active' : ''}`; 
+            div.dataset.id = panel.id;
+            let countdown = panel.is_active ? panel.delay - (Date.now() / 1000 - panel.last_spam_time) : panel.delay;
+            countdown = Math.max(0, Math.ceil(countdown));
+            div.innerHTML = `
+                <textarea class="message-input" placeholder="Nội dung spam...">${panel.message}</textarea>
+                <input type="text" class="channel-input" placeholder="ID Kênh..." value="${panel.channel_id}">
+                <input type="number" class="delay-input" placeholder="Delay (giây)..." value="${panel.delay}">
+                <div class="spam-panel-controls">
+                    <button class="toggle-btn">${panel.is_active ? 'TẮT' : 'BẬT'}</button>
+                    <button class="delete-btn">XÓA</button>
+                </div>
+                <div class="timer">Hẹn giờ: ${countdown}s</div>
+            `;
+            
+            const getPanelData = () => ({ 
+                ...panel, 
+                message: div.querySelector('.message-input').value, 
+                channel_id: div.querySelector('.channel-input').value, 
+                delay: parseInt(div.querySelector('.delay-input').value, 10) || 60 
+            });
+            
+            div.querySelector('.toggle-btn').addEventListener('click', () => 
+                apiCall('/api/panel/update', 'POST', { ...getPanelData(), is_active: !panel.is_active }).then(fetchPanels)
+            );
+            div.querySelector('.delete-btn').addEventListener('click', () => { 
+                if (confirm('Xóa bảng này?')) 
+                    apiCall('/api/panel/delete', 'POST', { id: panel.id }).then(fetchPanels); 
+            });
+            // Update on change instead of blur for better UX
+            div.querySelector('.message-input').addEventListener('input', () => apiCall('/api/panel/update', 'POST', getPanelData()));
+            div.querySelector('.channel-input').addEventListener('input', () => apiCall('/api/panel/update', 'POST', getPanelData()));
+            div.querySelector('.delay-input').addEventListener('input', () => apiCall('/api/panel/update', 'POST', getPanelData()));
+            
+            return div;
+        }
+        
+        async function fetchPanels() {
+            // Avoid refetching if user is typing
+            const focusedEl = document.activeElement;
+            if (focusedEl && focusedEl.closest('.spam-panel')) return;
+
+            const data = await apiCall('/api/panels', 'GET');
+            const container = document.getElementById('panel-container'); 
+            container.innerHTML = '';
+            if (data.panels) data.panels.forEach(panel => container.appendChild(createPanelElement(panel)));
+        }
+        
+        async function addPanel() { 
+            await apiCall('/api/panel/add'); 
+            fetchPanels(); 
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchStatus(); fetchPanels();
+            setInterval(fetchStatus, 2000); 
+            setInterval(fetchPanels, 2000);
+        });
     </script>
 </body>
 </html>
@@ -563,61 +714,60 @@ HTML_TEMPLATE = """
 def index():
     return render_template_string(HTML_TEMPLATE)
 
-@app.route("/logs")
-def view_logs():
-    try:
-        with open("bot.log", "r", encoding="utf-8") as f:
-            log_lines = f.readlines()[-200:]
-        log_content = "".join(log_lines)
-        return f'<html><head><title>Bot Logs</title><style>body {{ background-color: #121212; color: #e0e0e0; font-family: monospace; }}</style></head><body><pre>{log_content}</pre></body></html>'
-    except FileNotFoundError:
-        return "Log file not found."
-    except Exception as e:
-        return f"An error occurred: {e}"
-
 @app.route("/api/status", methods=['GET'])
 def status():
     with lock:
         return jsonify({
-            "is_event_bot_running": is_event_bot_running, "is_hourly_loop_enabled": is_hourly_loop_enabled,
-            "loop_delay_seconds": loop_delay_seconds, "is_autoclick_running": is_autoclick_running,
-            "autoclick_button_index": autoclick_button_index, "autoclick_count": autoclick_count,
-            "autoclick_clicks_done": autoclick_clicks_done, "is_auto_kd_running": is_auto_kd_running,
-            "kd_channel_id": KD_CHANNEL_ID or "Chưa cấu hình", "is_auto_kvi_running": is_auto_kvi_running,
+            "is_event_bot_running": is_event_bot_running,
+            "is_hourly_loop_enabled": is_hourly_loop_enabled,
+            "loop_delay_seconds": loop_delay_seconds,
+            "is_autoclick_running": is_autoclick_running,
+            "autoclick_button_index": autoclick_button_index,
+            "autoclick_count": autoclick_count,
+            "autoclick_clicks_done": autoclick_clicks_done,
+            "is_auto_kd_running": is_auto_kd_running,
+            "kd_channel_id": KD_CHANNEL_ID or "Chưa cấu hình",
+            "is_auto_kvi_running": is_auto_kvi_running,
             "kvi_channel_id": KVI_CHANNEL_ID or "Chưa cấu hình"
         })
 
+# --- CÁC API TOGGLE ---
 @app.route("/api/toggle_event_bot", methods=['POST'])
 def toggle_event_bot():
-    global event_bot_thread, is_event_bot_running
+    global event_bot_thread, is_event_bot_running, is_autoclick_running
     with lock:
         if is_autoclick_running: return jsonify({"status": "error", "message": "Auto Click is running."}), 400
+        
         if is_event_bot_running:
             is_event_bot_running = False
-            logging.info("[CONTROL] Nhận lệnh DỪNG Bot Event.")
+            print("[CONTROL] Nhận lệnh DỪNG Bot Event.", flush=True)
         else:
             is_event_bot_running = True
-            logging.info("[CONTROL] Nhận lệnh BẬT Bot Event.")
+            print("[CONTROL] Nhận lệnh BẬT Bot Event.", flush=True)
             event_bot_thread = threading.Thread(target=run_event_bot_thread, daemon=True); event_bot_thread.start()
+
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
 
+
 @app.route("/api/toggle_autoclick", methods=['POST'])
 def toggle_autoclick():
-    global autoclick_bot_thread, is_autoclick_running, autoclick_button_index, autoclick_count, autoclick_clicks_done, autoclick_target_message_data
+    global autoclick_bot_thread, is_autoclick_running, is_event_bot_running, autoclick_button_index, autoclick_count, autoclick_clicks_done, autoclick_target_message_data
     data = request.get_json()
     with lock:
         if is_event_bot_running: return jsonify({"status": "error", "message": "Event Bot is running."}), 400
+        
         if is_autoclick_running:
              is_autoclick_running = False
-             logging.info("[CONTROL] Nhận lệnh DỪNG Auto Click.")
+             print("[CONTROL] Nhận lệnh DỪNG Auto Click.", flush=True)
         else:
             is_autoclick_running = True
             autoclick_button_index = int(data.get('button_index', 0))
             autoclick_count = int(data.get('count', 1))
             autoclick_clicks_done = 0; autoclick_target_message_data = None
-            logging.info(f"[CONTROL] Nhận lệnh BẬT Auto Click: {autoclick_count or 'vô hạn'} lần vào button {autoclick_button_index}.")
+            print(f"[CONTROL] Nhận lệnh BẬT Auto Click: {autoclick_count or 'vô hạn'} lần vào button {autoclick_button_index}.", flush=True)
             autoclick_bot_thread = threading.Thread(target=run_autoclick_bot_thread, daemon=True); autoclick_bot_thread.start()
+
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
 
@@ -626,31 +776,35 @@ def toggle_auto_kd():
     global auto_kd_thread, is_auto_kd_running
     with lock:
         if not KD_CHANNEL_ID: return jsonify({"status": "error", "message": "Chưa cấu hình KD_CHANNEL_ID."}), 400
+        
         if is_auto_kd_running:
             is_auto_kd_running = False
-            logging.info("[CONTROL] Nhận lệnh DỪNG Auto KD.")
+            print("[CONTROL] Nhận lệnh DỪNG Auto KD.", flush=True)
         else:
             is_auto_kd_running = True
-            logging.info("[CONTROL] Nhận lệnh BẬT Auto KD.")
+            print("[CONTROL] Nhận lệnh BẬT Auto KD.", flush=True)
             auto_kd_thread = threading.Thread(target=run_auto_kd_thread, daemon=True); auto_kd_thread.start()
+
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
 
+# --- API MỚI CHO KVI ---
 @app.route("/api/toggle_auto_kvi", methods=['POST'])
 def toggle_auto_kvi():
     global auto_kvi_thread, is_auto_kvi_running
     with lock:
         if not KVI_CHANNEL_ID or not GEMINI_API_KEY:
-            msg = "Chưa cấu hình KVI_CHANNEL_ID hoặc GEMINI_API_KEY."
-            logging.error(f"[CONTROL] {msg}")
-            return jsonify({"status": "error", "message": msg}), 400
+            return jsonify({"status": "error", "message": "Chưa cấu hình KVI_CHANNEL_ID hoặc GEMINI_API_KEY."}), 400
+        
         is_auto_kvi_running = not is_auto_kvi_running
-        logging.info(f"[CONTROL] Nhận lệnh {'BẬT' if is_auto_kvi_running else 'DỪNG'} Auto KVI.")
+        print(f"[CONTROL] Nhận lệnh {'BẬT' if is_auto_kvi_running else 'DỪNG'} Auto KVI.", flush=True)
         if is_auto_kvi_running:
             auto_kvi_thread = threading.Thread(target=run_kvi_ai_clicker, daemon=True)
             auto_kvi_thread.start()
+        
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
+
 
 @app.route("/api/toggle_hourly_loop", methods=['POST'])
 def toggle_hourly_loop():
@@ -661,10 +815,15 @@ def toggle_hourly_loop():
         loop_delay_seconds = int(data.get('delay', 3600))
         if is_hourly_loop_enabled and (hourly_loop_thread is None or not hourly_loop_thread.is_alive()):
             hourly_loop_thread = threading.Thread(target=run_hourly_loop_thread, daemon=True); hourly_loop_thread.start()
-        logging.info(f"[CONTROL] Vòng lặp {'ĐÃ BẬT' if is_hourly_loop_enabled else 'ĐÃ TẮT'}.")
+        
+        print(f"[CONTROL] Vòng lặp {'ĐÃ BẬT' if is_hourly_loop_enabled else 'ĐÃ TẮT'}.", flush=True)
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
 
+
+# ===================================================================
+# API CHO SPAM PANEL
+# ===================================================================
 @app.route("/api/panels", methods=['GET'])
 def get_panels():
     with lock: return jsonify({"panels": spam_panels})
@@ -701,13 +860,10 @@ def delete_panel():
 # KHỞI CHẠY WEB SERVER
 # ===================================================================
 if __name__ == "__main__":
-    logging.info("========================================")
-    logging.info("======      KHỞI ĐỘNG BOT       ======")
-    logging.info("========================================")
     load_settings()
     restore_bot_states()
     spam_thread = threading.Thread(target=spam_loop, daemon=True)
     spam_thread.start()
     port = int(os.environ.get("PORT", 10000))
-    logging.info(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}")
+    print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
