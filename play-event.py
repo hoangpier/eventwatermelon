@@ -6,7 +6,7 @@ import random
 import requests
 import os
 import sys
-import re # <<< THÊM MỚI: Cần cho Auto KVI
+import re
 from collections import deque
 from flask import Flask, jsonify, render_template_string, request
 from dotenv import load_dotenv
@@ -20,8 +20,8 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 KD_CHANNEL_ID = os.getenv("KD_CHANNEL_ID")
-KVI_CHANNEL_ID = os.getenv("KVI_CHANNEL_ID") # <<< THÊM MỚI
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") # <<< THÊM MỚI
+KVI_CHANNEL_ID = os.getenv("KVI_CHANNEL_ID")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 JSONBIN_API_KEY = os.getenv("JSONBIN_API_KEY")
 JSONBIN_BIN_ID = os.getenv("JSONBIN_BIN_ID")
 KARUTA_ID = "646937666251915264"
@@ -48,7 +48,7 @@ lock = threading.RLock()
 is_event_bot_running = False
 is_autoclick_running = False
 is_auto_kd_running = False
-is_auto_kvi_running = False # <<< THÊM MỚI
+is_auto_kvi_running = False
 
 # Các biến cài đặt (sẽ được load từ JSON)
 is_hourly_loop_enabled = False
@@ -62,7 +62,7 @@ hourly_loop_thread = None
 autoclick_bot_thread, autoclick_bot_instance = None, None
 autoclick_button_index, autoclick_count, autoclick_clicks_done, autoclick_target_message_data = 0, 0, 0, None
 auto_kd_thread, auto_kd_instance = None, None
-auto_kvi_thread, auto_kvi_instance = None, None # <<< THÊM MỚI
+auto_kvi_thread, auto_kvi_instance = None, None
 spam_thread = None
 
 # ===================================================================
@@ -80,7 +80,7 @@ def save_settings():
             # Trạng thái chạy
             'is_event_bot_running': is_event_bot_running,
             'is_auto_kd_running': is_auto_kd_running,
-            'is_auto_kvi_running': is_auto_kvi_running, # <<< THÊM MỚI
+            'is_auto_kvi_running': is_auto_kvi_running,
             'is_autoclick_running': is_autoclick_running,
             
             # Cài đặt loop
@@ -137,7 +137,7 @@ def load_settings():
                     # Load trạng thái chạy
                     is_event_bot_running = settings.get('is_event_bot_running', False)
                     is_auto_kd_running = settings.get('is_auto_kd_running', False)
-                    is_auto_kvi_running = settings.get('is_auto_kvi_running', False) # <<< THÊM MỚI
+                    is_auto_kvi_running = settings.get('is_auto_kvi_running', False)
                     is_autoclick_running = settings.get('is_autoclick_running', False)
                     
                     # Load cài đặt loop
@@ -386,7 +386,7 @@ def run_auto_kd_thread():
         print("[AUTO KD] Luồng Auto KD đã dừng.", flush=True)
 
 # ===================================================================
-# <<< START: CHỨC NĂNG AUTO KVI MỚI >>>
+# CHỨC NĂNG AUTO KVI
 # ===================================================================
 def run_auto_kvi_thread():
     global is_auto_kvi_running, auto_kvi_instance
@@ -528,18 +528,32 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
             question_match = re.search(pattern, desc, re.DOTALL)
             if question_match:
                 question = question_match.group(1).strip()
-                options = [btn.get("label", "").strip() for row in m.get("components", []) for btn in row.get("components", []) if btn.get("label")]
+                options = []
                 
+                button_labels = [btn.get("label", "").strip() for row in m.get("components", []) for btn in row.get("components", []) if btn.get("label")]
+                
+                if all(label.isdigit() for label in button_labels):
+                    print("[AUTO KVI] INFO: Phát hiện tùy chọn trong mô tả embed. Đang phân tích...", flush=True)
+                    lines = desc.split('\n')
+                    for line in lines:
+                        match = re.search(r'^\s*(?:\d{1,2}[\.\)]|\d{1,2}️⃣)\s*(.+)', line)
+                        if match:
+                            option_text = match.group(1).strip()
+                            if option_text:
+                                options.append(option_text)
+                else:
+                    options = button_labels
+
                 if question and len(options) >= 2:
-                    print(f"[AUTO KVI] INFO: Tìm thấy câu hỏi với {len(options)} lựa chọn", flush=True)
+                    print(f"[AUTO KVI] INFO: Tìm thấy câu hỏi với {len(options)} lựa chọn.", flush=True)
                     question_found = True
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options), daemon=True).start()
                     break
         
         if not question_found:
             if "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
-                print("[AUTO KVI] INFO: Phiên KVI kết thúc, chuẩn bị gửi kvi mới", flush=True)
-                time.sleep(random.uniform(10, 15))
+                print("[AUTO KVI] INFO: Phiên KVI kết thúc, chuẩn bị gửi kvi mới sau 30 phút.", flush=True)
+                time.sleep(1800) 
                 try:
                     bot.sendMessage(KVI_CHANNEL_ID, "kvi")
                     print("[AUTO KVI] INFO: Đã gửi lệnh kvi mới", flush=True)
@@ -592,9 +606,6 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
             auto_kvi_instance = None
             save_settings()
         print("[AUTO KVI] Luồng Auto KVI đã dừng.", flush=True)
-# ===================================================================
-# <<< END: CHỨC NĂNG AUTO KVI MỚI >>>
-# ===================================================================
 
 def run_hourly_loop_thread():
     global is_hourly_loop_enabled, loop_delay_seconds
@@ -664,7 +675,6 @@ def restore_bot_states():
         auto_kd_thread = threading.Thread(target=run_auto_kd_thread, daemon=True)
         auto_kd_thread.start()
     
-    # <<< THÊM MỚI >>>
     if is_auto_kvi_running and KVI_CHANNEL_ID and GEMINI_API_KEY:
         print("[RESTORE] Khôi phục Auto KVI...", flush=True)
         auto_kvi_thread = threading.Thread(target=run_auto_kvi_thread, daemon=True)
@@ -833,7 +843,7 @@ HTML_TEMPLATE = """
             document.getElementById('auto-kd-panel').classList.toggle('active-mode', data.is_auto_kd_running);
             document.getElementById('kd-channel-display').textContent = data.kd_channel_id;
 
-            // <<< THÊM MỚI: Auto KVI >>>
+            // Auto KVI
             document.getElementById('auto-kvi-status').textContent = data.is_auto_kvi_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
             document.getElementById('auto-kvi-status').className = data.is_auto_kvi_running ? 'status status-on' : 'status status-off';
             document.getElementById('toggleAutoKviBtn').textContent = data.is_auto_kvi_running ? 'Dừng Auto KVI' : 'Bật Auto KVI';
@@ -857,7 +867,7 @@ HTML_TEMPLATE = """
             }).then(fetchStatus);
         });
         document.getElementById('toggleAutoKdBtn').addEventListener('click', () => apiCall('/api/toggle_auto_kd').then(fetchStatus));
-        document.getElementById('toggleAutoKviBtn').addEventListener('click', () => apiCall('/api/toggle_auto_kvi').then(fetchStatus)); // <<< THÊM MỚI
+        document.getElementById('toggleAutoKviBtn').addEventListener('click', () => apiCall('/api/toggle_auto_kvi').then(fetchStatus));
         document.getElementById('toggleLoopBtn').addEventListener('click', () => {
             const isEnabled = !document.getElementById('loop-status').textContent.includes('ĐANG CHẠY');
             apiCall('/api/toggle_hourly_loop', 'POST', { 
@@ -946,8 +956,8 @@ def status():
             "autoclick_clicks_done": autoclick_clicks_done,
             "is_auto_kd_running": is_auto_kd_running,
             "kd_channel_id": KD_CHANNEL_ID or "Chưa cấu hình",
-            "is_auto_kvi_running": is_auto_kvi_running, # <<< THÊM MỚI
-            "kvi_channel_id": KVI_CHANNEL_ID or "Chưa cấu hình" # <<< THÊM MỚI
+            "is_auto_kvi_running": is_auto_kvi_running,
+            "kvi_channel_id": KVI_CHANNEL_ID or "Chưa cấu hình"
         })
 
 @app.route("/api/toggle_event_bot", methods=['POST'])
@@ -1013,9 +1023,6 @@ def toggle_auto_kd():
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
 
-# ===================================================================
-# <<< START: API CHO AUTO KVI >>>
-# ===================================================================
 @app.route("/api/toggle_auto_kvi", methods=['POST'])
 def toggle_auto_kvi():
     global auto_kvi_thread, is_auto_kvi_running
@@ -1034,9 +1041,6 @@ def toggle_auto_kvi():
         
         save_result = save_settings()
     return jsonify({"status": "ok", "save_status": save_result})
-# ===================================================================
-# <<< END: API CHO AUTO KVI >>>
-# ===================================================================
 
 @app.route("/api/toggle_hourly_loop", methods=['POST'])
 def toggle_hourly_loop():
