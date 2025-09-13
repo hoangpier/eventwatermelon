@@ -488,15 +488,14 @@ Please respond with ONLY the number of the best option. For example: 3"""
     def on_message(resp):
         nonlocal last_action_time
         with lock:
-            if not is_auto_kvi_running:
-                bot.gateway.close(); return
+            if not is_auto_kvi_running: return
         
         if not (resp.event.message or resp.event.message_updated): return
         
         m = resp.parsed.auto()
         if not (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == KVI_CHANNEL_ID): return
-        
-        print("\n[AUTO KVI LOG] --- Tin nhắn mới từ Karuta ---", flush=True)
+
+        print("\n[AUTO KVI LOG] --- Đã nhận đúng tin nhắn từ Karuta ở đúng kênh ---", flush=True)
         last_action_time = time.time()
         
         embeds = m.get("embeds", [])
@@ -505,29 +504,31 @@ Please respond with ONLY the number of the best option. For example: 3"""
             desc = embed.get("description", "")
             print(f"[AUTO KVI LOG] Description Embed: {desc.replace(chr(10), '<NL>')}", flush=True)
 
-            # PHÂN TÍCH CÂU HỎI TRONG DESCRIPTION (PHIÊN BẢN MỚI, BỀN VỮNG)
-            if desc.startswith('"') and '\n' in desc:
-                print("[AUTO KVI LOG] Điều kiện nhận diện câu hỏi thỏa mãn (bắt đầu bằng \" và có xuống dòng).", flush=True)
-                lines = desc.split('\n')
-                question = lines[0].strip('"')
+            # --- SỬA LỖI: Dùng regex để tìm câu hỏi ở bất kỳ đâu ---
+            question_match = re.search(r'["“](.+?)["”]', desc)
+
+            if question_match:
+                question = question_match.group(1)
+                print(f"[AUTO KVI LOG] Regex đã tìm thấy câu hỏi: '{question}'", flush=True)
+                
                 options = []
-                for line in lines[1:]:
-                    # Xóa mọi ký tự không phải chữ cái ở đầu dòng (loại bỏ mọi emoji, số, ký tự đặc biệt)
+                # Tách các dòng sau câu hỏi để tìm lựa chọn
+                options_part = desc.split(question_match.group(0))[-1]
+                for line in options_part.split('\n'):
+                    # Xóa mọi ký tự không phải chữ cái ở đầu dòng
                     cleaned_line = re.sub(r'^\s*[^a-zA-Z]+', '', line).strip()
                     if cleaned_line and "Choose the response" not in cleaned_line:
                         options.append(cleaned_line)
-                
-                print(f"[AUTO KVI LOG] Đã trích xuất -> Câu hỏi: '{question}'", flush=True)
-                print(f"[AUTO KVI LOG] Đã trích xuất -> Lựa chọn: {options}", flush=True)
 
+                print(f"[AUTO KVI LOG] Đã trích xuất -> Lựa chọn: {options}", flush=True)
                 if question and options:
                     print("[AUTO KVI LOG] Dữ liệu hợp lệ -> Gửi cho Gemini...", flush=True)
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'button_label')).start()
                     return
 
-            # XỬ LÝ CÂU HỎI TRONG FIELDS (KIỂU CŨ)
+            # Xử lý câu hỏi trong fields (kiểu cũ, để dự phòng)
             fields = embed.get("fields", [])
-            if desc.startswith('"') and fields:
+            if not question_match and desc.startswith('"') and fields:
                 print("[AUTO KVI LOG] Phát hiện câu hỏi kiểu 'fields'.", flush=True)
                 question = desc.strip('"')
                 options = [f.get("value", "") for f in fields if f.get("name", "").isdigit()]
