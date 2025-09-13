@@ -428,7 +428,7 @@ def run_auto_kvi_thread():
     KVI_COOLDOWN_SECONDS = 5
     KVI_TIMEOUT_SECONDS = 7200
     
-    def answer_question_with_gemini(bot_instance, message_data, question, options, answer_style='custom_id'):
+    def answer_question_with_gemini(bot_instance, message_data, question, options):
         print(f"[AUTO KVI] GEMINI: Nhận được câu hỏi: '{question}'", flush=True)
         
         try:
@@ -442,12 +442,9 @@ Options:
 
 Please respond with ONLY the number of the best option. For example: 3"""
 
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}]
-            }
+            payload = { "contents": [{"parts": [{"text": prompt}]}] }
             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
             
-            print("[AUTO KVI LOG] Đang gửi yêu cầu trực tiếp đến Gemini API...", flush=True)
             response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload, timeout=20)
             response.raise_for_status()
             
@@ -457,34 +454,28 @@ Please respond with ONLY the number of the best option. For example: 3"""
             match = re.search(r'\d+', api_text)
             if match:
                 selected_option = int(match.group(0))
-                print(f"[AUTO KVI LOG] Gemini đã trả về số: {selected_option}", flush=True)
                 if not (1 <= selected_option <= len(options)):
-                    print(f"[AUTO KVI LOG] LỖI: Gemini trả về số không hợp lệ: {selected_option}", flush=True)
+                    print(f"[AUTO KVI] LỖI: Gemini trả về số không hợp lệ: {selected_option}", flush=True)
                     return
                 
                 print(f"[AUTO KVI] GEMINI: Gemini đã chọn câu trả lời số {selected_option}: '{options[selected_option-1]}'", flush=True)
                 
-                custom_id_to_click = None
-                if answer_style == 'custom_id':
-                    custom_id_to_click = f"kvi_answer_{selected_option-1}"
-                elif answer_style == 'button_label':
-                    all_buttons = [button for row in message_data.get("components", []) for button in row.get("components", [])]
-                    target_button = next((btn for btn in all_buttons if btn.get("label") == str(selected_option)), None)
-                    if target_button:
-                        custom_id_to_click = target_button.get("custom_id")
+                # <<< THAY ĐỔI THEO YÊU CẦU: BẤM THEO VỊ TRÍ >>>
+                # AI trả về 1, 2, 3 -> Vị trí index là 0, 1, 2
+                button_index_to_click = selected_option - 1
                 
-                if custom_id_to_click:
-                    time.sleep(2) 
-                    send_interaction(bot_instance, message_data, custom_id_to_click, "AUTO KVI")
-                else:
-                    print(f"[AUTO KVI LOG] LỖI: Không tìm thấy nút bấm tương ứng với lựa chọn {selected_option}", flush=True)
+                print(f"[AUTO KVI] INFO: Sẽ bấm vào nút ở vị trí index {button_index_to_click}", flush=True)
+                time.sleep(2) # Thêm độ trễ nhỏ để đảm bảo nút sẵn sàng
+                
+                click_button_by_index(bot_instance, message_data, button_index_to_click, "AUTO KVI")
+                # <<< KẾT THÚC THAY ĐỔI >>>
             else:
-                print(f"[AUTO KVI LOG] LỖI: Không tìm thấy số trong câu trả lời của Gemini: '{api_text}'", flush=True)
+                print(f"[AUTO KVI] LỖI: Không tìm thấy số trong câu trả lời của Gemini: '{api_text}'", flush=True)
 
         except requests.exceptions.RequestException as e:
-            print(f"[AUTO KVI LOG] LỖI YÊU CẦU API: {e}", flush=True)
+            print(f"[AUTO KVI] LỖI YÊU CẦU API: {e}", flush=True)
         except Exception as e:
-            print(f"[AUTO KVI LOG] LỖI NGOẠI LỆ: Exception khi gọi Gemini: {e}", flush=True)
+            print(f"[AUTO KVI] LỖI NGOẠI LỆ: Exception khi gọi Gemini: {e}", flush=True)
 
     @bot.gateway.command
     def on_message(resp):
@@ -500,7 +491,6 @@ Please respond with ONLY the number of the best option. For example: 3"""
 
         current_time = time.time()
         if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
-            print(f"[AUTO KVI] COOLDOWN: Bỏ qua tin nhắn, còn {KVI_COOLDOWN_SECONDS - (current_time - last_api_call_time):.1f}s nữa.", flush=True)
             return
         
         last_action_time = time.time()
@@ -524,7 +514,8 @@ Please respond with ONLY the number of the best option. For example: 3"""
                 if question and options:
                     last_api_call_time = time.time()
                     action_taken = True
-                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'button_label')).start()
+                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options)).start()
+                    return
 
             fields = embed.get("fields", [])
             if not action_taken and desc.startswith('"') and fields:
@@ -533,7 +524,8 @@ Please respond with ONLY the number of the best option. For example: 3"""
                 if question and options:
                     last_api_call_time = time.time()
                     action_taken = True
-                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'custom_id')).start()
+                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options)).start()
+                    return
 
         if not action_taken:
             components = m.get("components", [])
@@ -545,7 +537,7 @@ Please respond with ONLY the number of the best option. For example: 3"""
                 if target_button and target_button.get("custom_id"):
                     last_api_call_time = time.time()
                     threading.Thread(target=send_interaction, args=(bot, m, target_button.get("custom_id"), "AUTO KVI")).start()
-                    break
+                    return
 
     def periodic_kvi_sender():
         nonlocal last_action_time
@@ -1094,4 +1086,3 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
-
