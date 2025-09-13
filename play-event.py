@@ -10,7 +10,6 @@ import re
 from collections import deque
 from flask import Flask, jsonify, render_template_string, request
 from dotenv import load_dotenv
-import google.generativeai as genai
 
 # ===================================================================
 # CẤU HÌNH VÀ BIẾN TOÀN CỤC
@@ -27,19 +26,6 @@ JSONBIN_API_KEY = os.getenv("JSONBIN_API_KEY")
 JSONBIN_BIN_ID = os.getenv("JSONBIN_BIN_ID")
 KARUTA_ID = "646937666251915264"
 
-# --- Khởi tạo Gemini ---
-gemini_model = None
-if GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
-        print("[GEMINI] INFO: Gemini Pro model initialized successfully.", flush=True)
-    except Exception as e:
-        print(f"[GEMINI] LỖI: Không thể khởi tạo Gemini: {e}", flush=True)
-else:
-    print("[GEMINI] WARN: GEMINI_API_KEY chưa được cấu hình. Auto KVI sẽ không thể trả lời câu hỏi.", flush=True)
-
-
 # --- Kiểm tra biến môi trường ---
 if not TOKEN:
     print("LỖI: Vui lòng cung cấp DISCORD_TOKEN trong biến môi trường.", flush=True)
@@ -51,6 +37,8 @@ if not KD_CHANNEL_ID:
     print("CẢNH BÁO: KD_CHANNEL_ID chưa được cấu hình. Tính năng Auto KD sẽ không khả dụng.", flush=True)
 if not KVI_CHANNEL_ID:
     print("CẢNH BÁO: KVI_CHANNEL_ID chưa được cấu hình. Tính năng Auto KVI sẽ không khả dụng.", flush=True)
+if not GEMINI_API_KEY:
+    print("CẢNH BÁO: GEMINI_API_KEY chưa được cấu hình. Tính năng Auto KVI sẽ không khả dụng.", flush=True)
 
 
 # --- Các biến trạng thái và điều khiển ---
@@ -427,8 +415,8 @@ def run_auto_kvi_thread():
         print("[AUTO KVI] LỖI: Chưa cấu hình KVI_CHANNEL_ID.", flush=True)
         with lock: is_auto_kvi_running = False; save_settings()
         return
-    if not gemini_model:
-        print("[AUTO KVI] LỖI: Gemini chưa được khởi tạo.", flush=True)
+    if not GEMINI_API_KEY:
+        print("[AUTO KVI] LỖI: Gemini API Key chưa được cấu hình.", flush=True)
         with lock: is_auto_kvi_running = False; save_settings()
         return
 
@@ -440,7 +428,9 @@ def run_auto_kvi_thread():
     
     def answer_question_with_gemini(bot_instance, message_data, question, options, answer_style='custom_id'):
         print(f"[AUTO KVI] GEMINI: Nhận được câu hỏi: '{question}'", flush=True)
-        prompt = f"""You are an expert in the Discord game Karuta's KVI (Karuta Visit Interaction). Your goal is to choose the best, most positive, or most logical answer to continue a friendly conversation.
+        
+        try:
+            prompt = f"""You are an expert in the Discord game Karuta's KVI (Karuta Visit Interaction). Your goal is to choose the best, most positive, or most logical answer to continue a friendly conversation.
 Based on the following question, choose the best answer from the options provided.
 
 Question: "{question}"
@@ -449,10 +439,20 @@ Options:
 {chr(10).join([f"{i+1}. {opt}" for i, opt in enumerate(options)])}
 
 Please respond with ONLY the number of the best option. For example: 3"""
-        
-        try:
-            response = gemini_model.generate_content(prompt)
-            match = re.search(r'\d+', response.text)
+
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key={GEMINI_API_KEY}"
+            
+            print("[AUTO KVI LOG] Đang gửi yêu cầu trực tiếp đến Gemini API...", flush=True)
+            response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload, timeout=20)
+            response.raise_for_status()
+            
+            result = response.json()
+            api_text = result['candidates'][0]['content']['parts'][0]['text']
+            
+            match = re.search(r'\d+', api_text)
             if match:
                 selected_option = int(match.group(0))
                 print(f"[AUTO KVI LOG] Gemini đã trả về số: {selected_option}", flush=True)
@@ -480,7 +480,10 @@ Please respond with ONLY the number of the best option. For example: 3"""
                 else:
                     print(f"[AUTO KVI LOG] LỖI: Không tìm thấy nút bấm tương ứng với lựa chọn {selected_option}", flush=True)
             else:
-                print(f"[AUTO KVI LOG] LỖI: Không tìm thấy số trong câu trả lời của Gemini: '{response.text}'", flush=True)
+                print(f"[AUTO KVI LOG] LỖI: Không tìm thấy số trong câu trả lời của Gemini: '{api_text}'", flush=True)
+
+        except requests.exceptions.RequestException as e:
+            print(f"[AUTO KVI LOG] LỖI YÊU CẦU API: {e}", flush=True)
         except Exception as e:
             print(f"[AUTO KVI LOG] LỖI NGOẠI LỆ: Exception khi gọi Gemini: {e}", flush=True)
 
@@ -495,49 +498,35 @@ Please respond with ONLY the number of the best option. For example: 3"""
         m = resp.parsed.auto()
         if not (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == KVI_CHANNEL_ID): return
 
-        print("\n[AUTO KVI LOG] --- Đã nhận đúng tin nhắn từ Karuta ở đúng kênh ---", flush=True)
         last_action_time = time.time()
         
         embeds = m.get("embeds", [])
         if embeds:
             embed = embeds[0]
             desc = embed.get("description", "")
-            print(f"[AUTO KVI LOG] Description Embed: {desc.replace(chr(10), '<NL>')}", flush=True)
-
-            # --- SỬA LỖI: Dùng regex để tìm câu hỏi ở bất kỳ đâu ---
+            
             question_match = re.search(r'["“](.+?)["”]', desc)
-
             if question_match:
                 question = question_match.group(1)
-                print(f"[AUTO KVI LOG] Regex đã tìm thấy câu hỏi: '{question}'", flush=True)
-                
                 options = []
-                # Tách các dòng sau câu hỏi để tìm lựa chọn
                 options_part = desc.split(question_match.group(0))[-1]
                 for line in options_part.split('\n'):
-                    # Xóa mọi ký tự không phải chữ cái ở đầu dòng
                     cleaned_line = re.sub(r'^\s*[^a-zA-Z]+', '', line).strip()
                     if cleaned_line and "Choose the response" not in cleaned_line:
                         options.append(cleaned_line)
 
-                print(f"[AUTO KVI LOG] Đã trích xuất -> Lựa chọn: {options}", flush=True)
                 if question and options:
-                    print("[AUTO KVI LOG] Dữ liệu hợp lệ -> Gửi cho Gemini...", flush=True)
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'button_label')).start()
                     return
 
-            # Xử lý câu hỏi trong fields (kiểu cũ, để dự phòng)
             fields = embed.get("fields", [])
             if not question_match and desc.startswith('"') and fields:
-                print("[AUTO KVI LOG] Phát hiện câu hỏi kiểu 'fields'.", flush=True)
                 question = desc.strip('"')
                 options = [f.get("value", "") for f in fields if f.get("name", "").isdigit()]
                 if question and options:
-                    print("[AUTO KVI LOG] Dữ liệu hợp lệ -> Gửi cho Gemini...", flush=True)
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'custom_id')).start()
                     return
         
-        print("[AUTO KVI LOG] Không phát hiện câu hỏi, kiểm tra các nút hành động...", flush=True)
         components = m.get("components", [])
         all_buttons = [button for row in components for button in row.get("components", [])]
         button_priority_order = ["Talk", "Actions", "Date", "Propose", "Continue"]
@@ -545,14 +534,12 @@ Please respond with ONLY the number of the best option. For example: 3"""
         for label in button_priority_order:
             target_button = next((btn for btn in all_buttons if btn.get("label") == label), None)
             if target_button and target_button.get("custom_id"):
-                print(f"[AUTO KVI LOG] Phát hiện nút hành động '{label}'. Chuẩn bị click...", flush=True)
                 threading.Thread(target=send_interaction, args=(bot, m, target_button.get("custom_id"), "AUTO KVI")).start()
                 return
 
     def periodic_kvi_sender():
         nonlocal last_action_time
         time.sleep(10)
-        print("[AUTO KVI] INFO: Gửi 'kvi' lần đầu.", flush=True)
         bot.sendMessage(KVI_CHANNEL_ID, "kvi")
         last_action_time = time.time()
         
@@ -561,7 +548,6 @@ Please respond with ONLY the number of the best option. For example: 3"""
                 if not is_auto_kvi_running: break
             
             if time.time() - last_action_time > KVI_TIMEOUT_SECONDS:
-                 print(f"[AUTO KVI] INFO: Đã hơn {KVI_TIMEOUT_SECONDS} giây không có hành động. Gửi lại 'kvi'.", flush=True)
                  bot.sendMessage(KVI_CHANNEL_ID, "kvi")
                  last_action_time = time.time()
             
@@ -584,6 +570,7 @@ Please respond with ONLY the number of the best option. For example: 3"""
             auto_kvi_instance = None
             save_settings()
         print("[AUTO KVI] Luồng Auto KVI đã dừng.", flush=True)
+
 
 def run_hourly_loop_thread():
     global is_hourly_loop_enabled, loop_delay_seconds
@@ -658,7 +645,7 @@ def restore_bot_states():
         autoclick_bot_thread = threading.Thread(target=run_autoclick_bot_thread, daemon=True)
         autoclick_bot_thread.start()
 
-    if is_auto_kvi_running and KVI_CHANNEL_ID and gemini_model:
+    if is_auto_kvi_running and KVI_CHANNEL_ID and GEMINI_API_KEY:
         print("[RESTORE] Khôi phục Auto KVI...", flush=True)
         auto_kvi_thread = threading.Thread(target=run_auto_kvi_thread, daemon=True)
         auto_kvi_thread.start()
@@ -1012,7 +999,7 @@ def toggle_auto_kvi():
         if is_event_bot_running or is_autoclick_running:
             return jsonify({"status": "error", "message": "Chế độ khác đang chạy. Dừng nó trước."}), 400
         
-        if not KVI_CHANNEL_ID or not gemini_model:
+        if not KVI_CHANNEL_ID or not GEMINI_API_KEY:
             return jsonify({"status": "error", "message": "Chưa cấu hình KVI_CHANNEL_ID hoặc GEMINI_API_KEY."}), 400
         
         if is_auto_kvi_running:
@@ -1097,4 +1084,3 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
-
