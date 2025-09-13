@@ -631,24 +631,24 @@ def run_hourly_loop_thread():
         print("[HOURLY LOOP] Luồng vòng lặp đã dừng.", flush=True)
 
 def get_new_random_delay(panel):
-    # Use new minute-based keys if available
-    min_minutes = panel.get('delay_min_minutes', 4) # Default to 4 mins
-    max_minutes = panel.get('delay_max_minutes', 5) # Default to 5 mins
-    
-    # Fallback for old second-based keys
-    if 'delay_min' in panel:
-        min_minutes = round(panel['delay_min'] / 60)
-    if 'delay_max' in panel:
-        max_minutes = round(panel['delay_max'] / 60)
+    """Calculates the next spam delay based on the panel's selected mode."""
+    mode = panel.get('delay_mode', 'minutes') # Default to minutes for safety
 
-    # Ensure min <= max
-    if min_minutes > max_minutes:
-        min_minutes, max_minutes = max_minutes, min_minutes
-
-    chosen_minutes = random.randint(min_minutes, max_minutes)
-    humanizer_seconds = random.randint(1, 2) # Add 1-15 extra seconds
-    
-    return (chosen_minutes * 60) + humanizer_seconds
+    if mode == 'seconds':
+        min_seconds = panel.get('delay_min_seconds', 240)
+        max_seconds = panel.get('delay_max_seconds', 300)
+        if min_seconds > max_seconds:
+            min_seconds, max_seconds = max_seconds, min_seconds
+        return random.uniform(min_seconds, max_seconds)
+    else: # Default to minutes mode
+        min_minutes = panel.get('delay_min_minutes', 4)
+        max_minutes = panel.get('delay_max_minutes', 5)
+        if min_minutes > max_minutes:
+            min_minutes, max_minutes = max_minutes, min_minutes
+        
+        chosen_minutes = random.randint(min_minutes, max_minutes)
+        humanizer_seconds = random.randint(1, 15)
+        return (chosen_minutes * 60) + humanizer_seconds
 
 def spam_loop():
     bot = discum.Client(token=TOKEN, log=False)
@@ -677,7 +677,7 @@ def spam_loop():
                                 if p['id'] == panel['id']:
                                     next_delay = get_new_random_delay(p)
                                     p['next_spam_time'] = time.time() + next_delay
-                                    print(f"[SPAM BOT] Panel {p['id']} hẹn giờ tiếp theo sau {next_delay:.2f} giây.", flush=True)
+                                    print(f"[SPAM BOT] Panel {p['id']} (Mode: {p.get('delay_mode', 'minutes')}) hẹn giờ tiếp theo sau {next_delay:.2f} giây.", flush=True)
                                     break
                             save_settings()
                             
@@ -765,6 +765,12 @@ HTML_TEMPLATE = """
         .delay-range-group { display: flex; align-items: center; gap: 5px; }
         .delay-range-group input { text-align: center; }
         .delay-range-group span { color: #888; }
+        .mode-selector { display: flex; gap: 10px; background-color: #333; padding: 5px; border-radius: 5px; }
+        .mode-selector label { cursor: pointer; padding: 5px 10px; border-radius: 5px; transition: background-color 0.3s; user-select: none;}
+        .mode-selector input { display: none; }
+        .mode-selector input:checked + label { background-color: #bb86fc; color: #121212; }
+        .delay-inputs { display: none; }
+        .delay-inputs.visible { display: flex; flex-direction: column; gap: 5px; }
     </style>
 </head>
 <body>
@@ -772,53 +778,14 @@ HTML_TEMPLATE = """
     <h1>Karuta Bot Control</h1>
     <p>Chọn một chế độ để chạy. Các chế độ Event và AutoClick không thể chạy cùng lúc.</p>
     <div class="container">
-        <div class="panel" id="event-bot-panel">
-            <h2>Chế độ 1: Auto Play Event</h2>
-            <p style="font-size:0.9em; color:#aaa;">Tự động chơi event với logic phức tạp (di chuyển, tìm quả, xác nhận).</p>
-            <div id="event-bot-status" class="status">Trạng thái: ĐÃ DỪNG</div>
-            <button id="toggleEventBotBtn">Bật Auto Play</button>
-        </div>
-        <div class="panel" id="autoclick-panel">
-            <h2>Chế độ 2: Auto Click</h2>
-            <p style="font-size:0.9em; color:#aaa;">Chỉ click liên tục vào một nút. Bạn phải tự gõ 'kevent' để bot nhận diện.</p>
-            <div id="autoclick-status" class="status">Trạng thái: ĐÃ DỪNG</div>
-            <div class="input-group">
-                <label for="autoclick-button-index">Button Index</label>
-                <input type="number" id="autoclick-button-index" value="0" min="0">
-            </div>
-            <div class="input-group">
-                <label for="autoclick-count">Số lần click (0 = ∞)</label>
-                <input type="number" id="autoclick-count" value="10" min="0">
-            </div>
-            <button id="toggleAutoclickBtn">Bật Auto Click</button>
-        </div>
-        <div class="panel" id="auto-kd-panel">
-            <h2>Auto KD</h2>
-            <p style="font-size:0.9em; color:#aaa;">Tự động gửi 'kd' khi phát hiện "blessing has activated!" trong kênh KD.</p>
-            <div id="auto-kd-status" class="status">Trạng thái: ĐÃ DỪNG</div>
-            <div class="channel-display">KD Channel: <span id="kd-channel-display"></span></div>
-            <button id="toggleAutoKdBtn">Bật Auto KD</button>
-        </div>
-        <div class="panel" id="auto-kvi-panel">
-            <h2>Auto KVI (dùng Gemini AI)</h2>
-            <p style="font-size:0.9em; color:#aaa;">Tự động tương tác KVI. Dùng AI để chọn câu trả lời tốt nhất.</p>
-            <div id="auto-kvi-status" class="status">Trạng thái: ĐÃ DỪNG</div>
-            <div class="channel-display">KVI Channel: <span id="kvi-channel-display"></span></div>
-            <button id="toggleAutoKviBtn">Bật Auto KVI</button>
-        </div>
-        <div class="panel">
-            <h2>Tiện ích: Vòng lặp Event</h2>
-            <p style="font-size:0.9em; color:#aaa;">Tự động gửi 'kevent' theo chu kỳ. Chỉ hoạt động khi "Chế độ 1" đang chạy.</p>
-            <div id="loop-status" class="status">Trạng thái: ĐÃ DỪNG</div>
-            <div class="input-group-row">
-                <label for="delay-input">Delay (giây)</label>
-                <input type="number" id="delay-input" value="3600">
-            </div>
-            <button id="toggleLoopBtn">Bật Vòng lặp</button>
-        </div>
+        <div class="panel" id="event-bot-panel"><h2>Chế độ 1: Auto Play Event</h2><p style="font-size:0.9em; color:#aaa;">Tự động chơi event với logic phức tạp (di chuyển, tìm quả, xác nhận).</p><div id="event-bot-status" class="status">Trạng thái: ĐÃ DỪNG</div><button id="toggleEventBotBtn">Bật Auto Play</button></div>
+        <div class="panel" id="autoclick-panel"><h2>Chế độ 2: Auto Click</h2><p style="font-size:0.9em; color:#aaa;">Chỉ click liên tục vào một nút. Bạn phải tự gõ 'kevent' để bot nhận diện.</p><div id="autoclick-status" class="status">Trạng thái: ĐÃ DỪNG</div><div class="input-group"><label for="autoclick-button-index">Button Index</label><input type="number" id="autoclick-button-index" value="0" min="0"></div><div class="input-group"><label for="autoclick-count">Số lần click (0 = ∞)</label><input type="number" id="autoclick-count" value="10" min="0"></div><button id="toggleAutoclickBtn">Bật Auto Click</button></div>
+        <div class="panel" id="auto-kd-panel"><h2>Auto KD</h2><p style="font-size:0.9em; color:#aaa;">Tự động gửi 'kd' khi phát hiện "blessing has activated!" trong kênh KD.</p><div id="auto-kd-status" class="status">Trạng thái: ĐÃ DỪNG</div><div class="channel-display">KD Channel: <span id="kd-channel-display"></span></div><button id="toggleAutoKdBtn">Bật Auto KD</button></div>
+        <div class="panel" id="auto-kvi-panel"><h2>Auto KVI (dùng Gemini AI)</h2><p style="font-size:0.9em; color:#aaa;">Tự động tương tác KVI. Dùng AI để chọn câu trả lời tốt nhất.</p><div id="auto-kvi-status" class="status">Trạng thái: ĐÃ DỪNG</div><div class="channel-display">KVI Channel: <span id="kvi-channel-display"></span></div><button id="toggleAutoKviBtn">Bật Auto KVI</button></div>
+        <div class="panel"><h2>Tiện ích: Vòng lặp Event</h2><p style="font-size:0.9em; color:#aaa;">Tự động gửi 'kevent' theo chu kỳ. Chỉ hoạt động khi "Chế độ 1" đang chạy.</p><div id="loop-status" class="status">Trạng thái: ĐÃ DỪNG</div><div class="input-group-row"><label for="delay-input">Delay (giây)</label><input type="number" id="delay-input" value="3600"></div><button id="toggleLoopBtn">Bật Vòng lặp</button></div>
     </div>
     <div class="spam-controls">
-        <h2>Tiện ích: Spam Tin Nhắn (Random theo phút)</h2>
+        <h2>Tiện ích: Spam Tin Nhắn</h2>
         <div id="panel-container"></div>
         <button class="add-panel-btn" onclick="addPanel()">+ Thêm Bảng Spam</button>
     </div>
@@ -855,98 +822,64 @@ HTML_TEMPLATE = """
         
         async function fetchStatus() {
             const data = await apiCall('/api/status', 'GET');
-            if (data.error) { 
-                document.getElementById('event-bot-status').textContent = 'Lỗi kết nối server.'; 
-                return; 
-            }
-            
-            // Event Bot
-            const eventBotStatusDiv = document.getElementById('event-bot-status'), toggleEventBotBtn = document.getElementById('toggleEventBotBtn');
-            eventBotStatusDiv.textContent = data.is_event_bot_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
-            eventBotStatusDiv.className = data.is_event_bot_running ? 'status status-on' : 'status status-off';
-            toggleEventBotBtn.textContent = data.is_event_bot_running ? 'Dừng Auto Play' : 'Bật Auto Play';
-            toggleEventBotBtn.disabled = data.is_autoclick_running;
-            document.getElementById('event-bot-panel').classList.toggle('active-mode', data.is_event_bot_running);
-
-            // Autoclick
-            const autoclickStatusDiv = document.getElementById('autoclick-status'), toggleAutoclickBtn = document.getElementById('toggleAutoclickBtn');
+            if (data.error) { document.getElementById('event-bot-status').textContent = 'Lỗi kết nối server.'; return; }
+            const updateStatus = (elemId, text, className, btnId, btnText, panelId, active) => {
+                document.getElementById(elemId).textContent = text;
+                document.getElementById(elemId).className = className;
+                if(btnId) document.getElementById(btnId).textContent = btnText;
+                if(panelId) document.getElementById(panelId).classList.toggle('active-mode', active);
+            };
+            updateStatus('event-bot-status', data.is_event_bot_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG', data.is_event_bot_running ? 'status status-on' : 'status status-off', 'toggleEventBotBtn', data.is_event_bot_running ? 'Dừng Auto Play' : 'Bật Auto Play', 'event-bot-panel', data.is_event_bot_running);
+            document.getElementById('toggleEventBotBtn').disabled = data.is_autoclick_running;
             const countText = data.autoclick_count > 0 ? `${data.autoclick_clicks_done}/${data.autoclick_count}` : `${data.autoclick_clicks_done}/∞`;
-            autoclickStatusDiv.textContent = data.is_autoclick_running ? `Trạng thái: ĐANG CHẠY (${countText})` : 'Trạng thái: ĐÃ DỪNG';
-            autoclickStatusDiv.className = data.is_autoclick_running ? 'status status-on' : 'status status-off';
-            toggleAutoclickBtn.textContent = data.is_autoclick_running ? 'Dừng Auto Click' : 'Bật Auto Click';
-            document.getElementById('autoclick-button-index').disabled = data.is_autoclick_running;
-            document.getElementById('autoclick-count').disabled = data.is_autoclick_running;
-            toggleAutoclickBtn.disabled = data.is_event_bot_running;
-            document.getElementById('autoclick-panel').classList.toggle('active-mode', data.is_autoclick_running);
-
-            // Auto KD
-            document.getElementById('auto-kd-status').textContent = data.is_auto_kd_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
-            document.getElementById('auto-kd-status').className = data.is_auto_kd_running ? 'status status-on' : 'status status-off';
-            document.getElementById('toggleAutoKdBtn').textContent = data.is_auto_kd_running ? 'Dừng Auto KD' : 'Bật Auto KD';
-            document.getElementById('auto-kd-panel').classList.toggle('active-mode', data.is_auto_kd_running);
+            updateStatus('autoclick-status', data.is_autoclick_running ? `Trạng thái: ĐANG CHẠY (${countText})` : 'Trạng thái: ĐÃ DỪNG', data.is_autoclick_running ? 'status status-on' : 'status status-off', 'toggleAutoclickBtn', data.is_autoclick_running ? 'Dừng Auto Click' : 'Bật Auto Click', 'autoclick-panel', data.is_autoclick_running);
+            document.getElementById('autoclick-button-index').disabled = data.is_autoclick_running; document.getElementById('autoclick-count').disabled = data.is_autoclick_running; document.getElementById('toggleAutoclickBtn').disabled = data.is_event_bot_running;
+            updateStatus('auto-kd-status', data.is_auto_kd_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG', data.is_auto_kd_running ? 'status status-on' : 'status status-off', 'toggleAutoKdBtn', data.is_auto_kd_running ? 'Dừng Auto KD' : 'Bật Auto KD', 'auto-kd-panel', data.is_auto_kd_running);
             document.getElementById('kd-channel-display').textContent = data.kd_channel_id;
-
-            // Auto KVI
-            document.getElementById('auto-kvi-status').textContent = data.is_auto_kvi_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
-            document.getElementById('auto-kvi-status').className = data.is_auto_kvi_running ? 'status status-on' : 'status status-off';
-            document.getElementById('toggleAutoKviBtn').textContent = data.is_auto_kvi_running ? 'Dừng Auto KVI' : 'Bật Auto KVI';
-            document.getElementById('auto-kvi-panel').classList.toggle('active-mode', data.is_auto_kvi_running);
+            updateStatus('auto-kvi-status', data.is_auto_kvi_running ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG', data.is_auto_kvi_running ? 'status status-on' : 'status status-off', 'toggleAutoKviBtn', data.is_auto_kvi_running ? 'Dừng Auto KVI' : 'Bật Auto KVI', 'auto-kvi-panel', data.is_auto_kvi_running);
             document.getElementById('kvi-channel-display').textContent = data.kvi_channel_id;
-            
-            // Loop
-            const loopStatusDiv = document.getElementById('loop-status'), toggleLoopBtn = document.getElementById('toggleLoopBtn');
-            loopStatusDiv.textContent = data.is_hourly_loop_enabled ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG';
-            loopStatusDiv.className = data.is_hourly_loop_enabled ? 'status status-on' : 'status status-off';
-            toggleLoopBtn.textContent = data.is_hourly_loop_enabled ? 'TẮT VÒNG LẶP' : 'BẬT VÒNG LẶP';
-            toggleLoopBtn.disabled = !data.is_event_bot_running && !data.is_hourly_loop_enabled;
-            document.getElementById('delay-input').value = data.loop_delay_seconds;
+            updateStatus('loop-status', data.is_hourly_loop_enabled ? 'Trạng thái: ĐANG CHẠY' : 'Trạng thái: ĐÃ DỪNG', data.is_hourly_loop_enabled ? 'status status-on' : 'status status-off', 'toggleLoopBtn', data.is_hourly_loop_enabled ? 'TẮT VÒNG LẶP' : 'BẬT VÒNG LẶP');
+            document.getElementById('toggleLoopBtn').disabled = !data.is_event_bot_running && !data.is_hourly_loop_enabled; document.getElementById('delay-input').value = data.loop_delay_seconds;
         }
         
         document.getElementById('toggleEventBotBtn').addEventListener('click', () => apiCall('/api/toggle_event_bot').then(fetchStatus));
-        document.getElementById('toggleAutoclickBtn').addEventListener('click', () => {
-            apiCall('/api/toggle_autoclick', 'POST', { 
-                button_index: parseInt(document.getElementById('autoclick-button-index').value, 10), 
-                count: parseInt(document.getElementById('autoclick-count').value, 10) 
-            }).then(fetchStatus);
-        });
+        document.getElementById('toggleAutoclickBtn').addEventListener('click', () => apiCall('/api/toggle_autoclick', 'POST', { button_index: parseInt(document.getElementById('autoclick-button-index').value, 10), count: parseInt(document.getElementById('autoclick-count').value, 10) }).then(fetchStatus));
         document.getElementById('toggleAutoKdBtn').addEventListener('click', () => apiCall('/api/toggle_auto_kd').then(fetchStatus));
         document.getElementById('toggleAutoKviBtn').addEventListener('click', () => apiCall('/api/toggle_auto_kvi').then(fetchStatus));
-        document.getElementById('toggleLoopBtn').addEventListener('click', () => {
-            const isEnabled = !document.getElementById('loop-status').textContent.includes('ĐANG CHẠY');
-            apiCall('/api/toggle_hourly_loop', 'POST', { 
-                enabled: isEnabled, 
-                delay: parseInt(document.getElementById('delay-input').value, 10) 
-            }).then(fetchStatus);
-        });
+        document.getElementById('toggleLoopBtn').addEventListener('click', () => apiCall('/api/toggle_hourly_loop', 'POST', { enabled: !document.getElementById('loop-status').textContent.includes('ĐANG CHẠY'), delay: parseInt(document.getElementById('delay-input').value, 10) }).then(fetchStatus));
         
         function createPanelElement(panel) {
             const div = document.createElement('div');
             div.className = `spam-panel ${panel.is_active ? 'active' : ''}`; 
             div.dataset.id = panel.id;
-            
-            let countdown = 0;
-            if (panel.is_active && panel.next_spam_time) {
-                 countdown = panel.next_spam_time - (Date.now() / 1000);
-            }
-            countdown = Math.max(0, Math.ceil(countdown));
+            const isMinutesMode = panel.delay_mode !== 'seconds';
+            let countdown = (panel.is_active && panel.next_spam_time) ? Math.max(0, Math.ceil(panel.next_spam_time - (Date.now() / 1000))) : 0;
 
             div.innerHTML = `
+                <div class="input-group"><label>Nội dung spam</label><textarea class="message-input">${panel.message}</textarea></div>
+                <div class="input-group"><label>ID Kênh</label><input type="text" class="channel-input" value="${panel.channel_id}"></div>
+                
                 <div class="input-group">
-                    <label>Nội dung spam</label>
-                    <textarea class="message-input">${panel.message}</textarea>
-                </div>
-                <div class="input-group">
-                    <label>ID Kênh</label>
-                    <input type="text" class="channel-input" value="${panel.channel_id}">
-                </div>
-                <div class="input-group">
-                    <label>Delay ngẫu nhiên (phút)</label>
-                    <div class="delay-range-group">
-                        <input type="number" class="delay-input-min-minutes" placeholder="Tối thiểu" value="${panel.delay_min_minutes || 4}">
-                        <span>-</span>
-                        <input type="number" class="delay-input-max-minutes" placeholder="Tối đa" value="${panel.delay_max_minutes || 5}">
+                    <label>Chế độ Delay</label>
+                    <div class="mode-selector">
+                        <input type="radio" id="mode-seconds-${panel.id}" name="mode-${panel.id}" value="seconds" ${!isMinutesMode ? 'checked' : ''}><label for="mode-seconds-${panel.id}">Theo Giây</label>
+                        <input type="radio" id="mode-minutes-${panel.id}" name="mode-${panel.id}" value="minutes" ${isMinutesMode ? 'checked' : ''}><label for="mode-minutes-${panel.id}">Theo Phút</label>
                     </div>
                 </div>
+
+                <div class="delay-inputs delay-inputs-seconds ${!isMinutesMode ? 'visible' : ''}">
+                    <label>Delay ngẫu nhiên (giây)</label>
+                    <div class="delay-range-group">
+                        <input type="number" class="delay-input-min-seconds" value="${panel.delay_min_seconds || 240}"><span>-</span><input type="number" class="delay-input-max-seconds" value="${panel.delay_max_seconds || 300}">
+                    </div>
+                </div>
+                <div class="delay-inputs delay-inputs-minutes ${isMinutesMode ? 'visible' : ''}">
+                    <label>Delay ngẫu nhiên (phút)</label>
+                    <div class="delay-range-group">
+                         <input type="number" class="delay-input-min-minutes" value="${panel.delay_min_minutes || 4}"><span>-</span><input type="number" class="delay-input-max-minutes" value="${panel.delay_max_minutes || 5}">
+                    </div>
+                </div>
+
                 <div class="spam-panel-controls">
                     <button class="toggle-btn">${panel.is_active ? 'DỪNG' : 'CHẠY'}</button>
                     <button class="delete-btn">XÓA</button>
@@ -955,55 +888,50 @@ HTML_TEMPLATE = """
             `;
             
             const getPanelData = () => {
-                let min = parseInt(div.querySelector('.delay-input-min-minutes').value, 10) || 4;
-                let max = parseInt(div.querySelector('.delay-input-max-minutes').value, 10) || 5;
-                if (min > max) [min, max] = [max, min];
+                let min_s = parseInt(div.querySelector('.delay-input-min-seconds').value, 10) || 240; let max_s = parseInt(div.querySelector('.delay-input-max-seconds').value, 10) || 300;
+                if (min_s > max_s) [min_s, max_s] = [max_s, min_s];
+                let min_m = parseInt(div.querySelector('.delay-input-min-minutes').value, 10) || 4; let max_m = parseInt(div.querySelector('.delay-input-max-minutes').value, 10) || 5;
+                if (min_m > max_m) [min_m, max_m] = [max_m, min_m];
                 return { 
                     ...panel, 
-                    message: div.querySelector('.message-input').value, 
-                    channel_id: div.querySelector('.channel-input').value, 
-                    delay_min_minutes: min,
-                    delay_max_minutes: max
+                    message: div.querySelector('.message-input').value, channel_id: div.querySelector('.channel-input').value, 
+                    delay_mode: div.querySelector('input[name="mode-' + panel.id + '"]:checked').value,
+                    delay_min_seconds: min_s, delay_max_seconds: max_s,
+                    delay_min_minutes: min_m, delay_max_minutes: max_m
                 }
             };
             
-            div.querySelector('.toggle-btn').addEventListener('click', () => 
-                apiCall('/api/panel/update', 'POST', { ...getPanelData(), is_active: !panel.is_active }).then(fetchPanels)
-            );
-            div.querySelector('.delete-btn').addEventListener('click', () => { 
-                if (confirm('Bạn có chắc muốn xóa bảng spam này?')) 
-                    apiCall('/api/panel/delete', 'POST', { id: panel.id }).then(fetchPanels); 
-            });
+            div.querySelector('.toggle-btn').addEventListener('click', () => apiCall('/api/panel/update', 'POST', { ...getPanelData(), is_active: !panel.is_active }).then(fetchPanels));
+            div.querySelector('.delete-btn').addEventListener('click', () => { if (confirm('Bạn có chắc muốn xóa bảng spam này?')) apiCall('/api/panel/delete', 'POST', { id: panel.id }).then(fetchPanels); });
             
-            ['message-input', 'channel-input', 'delay-input-min-minutes', 'delay-input-max-minutes'].forEach(className => {
-                div.querySelector('.' + className).addEventListener('change', () => 
-                    apiCall('/api/panel/update', 'POST', getPanelData())
-                );
+            ['message-input', 'channel-input', 'delay-input-min-seconds', 'delay-input-max-seconds', 'delay-input-min-minutes', 'delay-input-max-minutes'].forEach(cls => {
+                div.querySelector('.' + cls).addEventListener('change', () => apiCall('/api/panel/update', 'POST', getPanelData()));
+            });
+
+            div.querySelectorAll('input[name="mode-' + panel.id + '"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    div.querySelector('.delay-inputs-seconds').classList.toggle('visible', e.target.value === 'seconds');
+                    div.querySelector('.delay-inputs-minutes').classList.toggle('visible', e.target.value === 'minutes');
+                    apiCall('/api/panel/update', 'POST', getPanelData());
+                });
             });
             
             return div;
         }
         
         async function fetchPanels() {
-            const focusedEl = document.activeElement;
-            if (focusedEl && (focusedEl.tagName === 'INPUT' || focusedEl.tagName === 'TEXTAREA')) {
-                return;
-            }
+            if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
             const data = await apiCall('/api/panels', 'GET');
             const container = document.getElementById('panel-container'); 
             container.innerHTML = '';
             if (data.panels) data.panels.forEach(panel => container.appendChild(createPanelElement(panel)));
         }
         
-        async function addPanel() { 
-            await apiCall('/api/panel/add'); 
-            fetchPanels(); 
-        }
+        async function addPanel() { await apiCall('/api/panel/add'); fetchPanels(); }
         
         document.addEventListener('DOMContentLoaded', () => {
             fetchStatus(); fetchPanels();
-            setInterval(fetchStatus, 5000);
-            setInterval(fetchPanels, 1000);
+            setInterval(fetchStatus, 5000); setInterval(fetchPanels, 1000);
         });
     </script>
 </body>
@@ -1147,8 +1075,11 @@ def add_panel():
             "id": panel_id_counter, 
             "message": "", 
             "channel_id": "", 
+            "delay_mode": "minutes",
             "delay_min_minutes": 4, 
             "delay_max_minutes": 5,
+            "delay_min_seconds": 240,
+            "delay_max_seconds": 300,
             "is_active": False, 
             "next_spam_time": 0 
         }
