@@ -32,7 +32,7 @@ gemini_model = None
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        gemini_model = genai.GenerativeModel('gemini-pro')
+        gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
         print("[GEMINI] INFO: Gemini Pro model initialized successfully.", flush=True)
     except Exception as e:
         print(f"[GEMINI] LỖI: Không thể khởi tạo Gemini: {e}", flush=True)
@@ -1097,3 +1097,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
+
