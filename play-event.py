@@ -480,7 +480,7 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         components = message_data.get("components", [])
         all_buttons = [button for row in components for button in row.get("components", [])]
         
-        button_priority = ["Talk", "Actions", "Date", "Propose", "Continue", "Next"]
+        button_priority = ["Talk"]
         
         for label in button_priority:
             target_index = next((i for i, btn in enumerate(all_buttons) if btn.get("label") == label and not btn.get("disabled")), None)
@@ -1126,3 +1126,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
+
