@@ -436,21 +436,38 @@ def run_auto_kvi_thread():
         print(f"[AUTO KVI] GEMINI: Nhận được câu hỏi: '{question}'", flush=True)
         
         try:
-            # Prompt được tối ưu hóa cho KVI
-            prompt = f"""You are playing Karuta's KVI (Visit Character) system. You need to choose the BEST response to build affection with the character.
+            # Extract character name from embed
+            character_name = "Unknown"
+            embed = message_data.get("embeds", [{}])[0]
+            desc = embed.get("description", "")
+            embed_title = embed.get("title", "")
+            
+            if "Character:" in desc:
+                char_match = re.search(r'Character:\s*([^(]+)', desc)
+                if char_match:
+                    character_name = char_match.group(1).strip()
+            elif embed_title:
+                character_name = embed_title.replace("Visit Character", "").strip()
+            
+            # Prompt được tối ưu hóa cho KVI với thông tin nhân vật
+            prompt = f"""You are playing Karuta's KVI (Visit Character) system. You are interacting with the character: {character_name}
+
+Your goal is to choose the BEST response to build affection and have a positive interaction with {character_name}.
 
 IMPORTANT RULES:
-1. Choose responses that show interest, care, or positive engagement
-2. Avoid negative, dismissive, or rude responses
-3. Pick answers that would naturally continue the conversation
-4. Prefer romantic or friendly options over neutral ones
+1. Choose responses that show interest, care, or positive engagement with {character_name}
+2. Consider the character's personality if you know it
+3. Avoid negative, dismissive, or rude responses
+4. Pick answers that would naturally continue the conversation
+5. Prefer romantic or friendly options over neutral ones
+6. Choose responses that would make {character_name} happy or interested
 
-Question: "{question}"
+Question from {character_name}: "{question}"
 
-Available options:
+Available response options:
 {chr(10).join([f"{i+1}. {opt}" for i, opt in enumerate(options)])}
 
-Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affection."""
+Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affection with {character_name}."""
 
             payload = { "contents": [{"parts": [{"text": prompt}]}] }
             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
@@ -636,26 +653,21 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
             
             current_time = time.time()
             
-            # Kiểm tra timeout - nếu không có hoạt động trong 10 phút
+            # CHỈ gửi kvi khi timeout (không có hoạt động trong 10 phút)
             if current_time - last_action_time > KVI_TIMEOUT_SECONDS:
-                try:
-                    bot.sendMessage(KVI_CHANNEL_ID, "kvi")
-                    last_action_time = current_time
-                    last_kvi_send_time = current_time
-                    print("[AUTO KVI] INFO: Timeout - gửi kvi để khởi động lại", flush=True)
-                except Exception as e:
-                    print(f"[AUTO KVI] LỖI: Không thể gửi kvi timeout: {e}", flush=True)
+                # Kiểm tra thêm điều kiện: phải cách lần gửi kvi cuối ít nhất 5 phút
+                if current_time - last_kvi_send_time > 300:  # 5 phút = 300 giây
+                    try:
+                        bot.sendMessage(KVI_CHANNEL_ID, "kvi")
+                        last_action_time = current_time
+                        last_kvi_send_time = current_time
+                        print("[AUTO KVI] INFO: Timeout - gửi kvi để khởi động lại", flush=True)
+                    except Exception as e:
+                        print(f"[AUTO KVI] LỖI: Không thể gửi kvi timeout: {e}", flush=True)
+                else:
+                     print("[AUTO KVI] INFO: Timeout nhưng vừa mới gửi kvi, bỏ qua", flush=True)
             
-            # Gửi kvi định kỳ mỗi 10 phút
-            elif current_time - last_kvi_send_time > KVI_AUTO_SEND_INTERVAL:
-                try:
-                    bot.sendMessage(KVI_CHANNEL_ID, "kvi")
-                    last_kvi_send_time = current_time
-                    print("[AUTO KVI] INFO: Gửi kvi định kỳ", flush=True)
-                except Exception as e:
-                    print(f"[AUTO KVI] LỖI: Không thể gửi kvi định kỳ: {e}", flush=True)
-            
-            time.sleep(30)  # Kiểm tra mỗi 30 giây
+            time.sleep(60)  # Kiểm tra mỗi 60 giây thay vì 30 giây
 
     @bot.gateway.command
     def on_ready(resp):
