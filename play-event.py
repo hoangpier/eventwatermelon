@@ -495,6 +495,10 @@ Please respond with ONLY the number of the best option. For example: 3"""
                         custom_id_to_click = target_button.get("custom_id")
 
                 if custom_id_to_click:
+                    # <<< START SỬA LỖI >>>
+                    print(f"[AUTO KVI] Đã xác định nút bấm. Chờ 2 giây trước khi click để tránh lỗi timing...", flush=True)
+                    time.sleep(2) 
+                    # <<< END SỬA LỖI >>>
                     send_interaction(bot_instance, message_data, custom_id_to_click, "AUTO KVI")
                 else:
                     print(f"[AUTO KVI] LỖI: Không tìm thấy nút bấm tương ứng với lựa chọn {selected_option}", flush=True)
@@ -517,13 +521,14 @@ Please respond with ONLY the number of the best option. For example: 3"""
         
         last_action_time = time.time()
         
+        # ƯU TIÊN 1: TÌM CÂU HỎI ĐỂ TRẢ LỜI
         embeds = m.get("embeds", [])
         if embeds:
             embed = embeds[0]
             desc = embed.get("description", "")
             fields = embed.get("fields", [])
             
-            # --- LOGIC MỚI: Xử lý câu hỏi trong description (như trong ảnh) ---
+            # Xử lý câu hỏi trong description (như trong ảnh)
             if desc.startswith('"') and '1️⃣' in desc:
                 lines = desc.split('\n')
                 question = lines[0].strip('"')
@@ -534,20 +539,20 @@ Please respond with ONLY the number of the best option. For example: 3"""
                         options.append(cleaned_line)
 
                 if question and options:
-                    print("[AUTO KVI] INFO: Phát hiện câu hỏi kiểu 'description'. Chuyển cho Gemini...", flush=True)
+                    print("[AUTO KVI] INFO: Phát hiện câu hỏi 'description'. Chuyển cho Gemini...", flush=True)
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'button_label')).start()
                     return
 
-            # --- LOGIC CŨ: Xử lý câu hỏi trong fields ---
+            # Xử lý câu hỏi trong fields (kiểu cũ)
             if desc.startswith('"') and fields:
                 question = desc.strip('"')
                 options = [f.get("value", "") for f in fields if f.get("name", "").isdigit()]
                 if question and options:
-                    print("[AUTO KVI] INFO: Phát hiện câu hỏi kiểu 'fields'. Chuyển cho Gemini...", flush=True)
+                    print("[AUTO KVI] INFO: Phát hiện câu hỏi 'fields'. Chuyển cho Gemini...", flush=True)
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'custom_id')).start()
                     return
 
-        # Xử lý các nút bấm thông thường (Talk, Actions,...)
+        # ƯU TIÊN 2: NẾU KHÔNG CÓ CÂU HỎI, MỚI BẤM CÁC NÚT HÀNH ĐỘNG
         components = m.get("components", [])
         all_buttons = [button for row in components for button in row.get("components", [])]
         button_priority_order = ["Talk", "Actions", "Date", "Propose", "Continue"]
@@ -555,7 +560,7 @@ Please respond with ONLY the number of the best option. For example: 3"""
         for label in button_priority_order:
             target_button = next((btn for btn in all_buttons if btn.get("label") == label), None)
             if target_button and target_button.get("custom_id"):
-                print(f"[AUTO KVI] INFO: Phát hiện nút '{label}'. Chuẩn bị click...", flush=True)
+                print(f"[AUTO KVI] INFO: Phát hiện nút hành động '{label}'. Chuẩn bị click...", flush=True)
                 threading.Thread(target=send_interaction, args=(bot, m, target_button.get("custom_id"), "AUTO KVI")).start()
                 return
 
