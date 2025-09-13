@@ -460,15 +460,12 @@ Please respond with ONLY the number of the best option. For example: 3"""
                 
                 print(f"[AUTO KVI] GEMINI: Gemini đã chọn câu trả lời số {selected_option}: '{options[selected_option-1]}'", flush=True)
                 
-                # <<< THAY ĐỔI THEO YÊU CẦU: BẤM THEO VỊ TRÍ >>>
-                # AI trả về 1, 2, 3 -> Vị trí index là 0, 1, 2
                 button_index_to_click = selected_option - 1
                 
                 print(f"[AUTO KVI] INFO: Sẽ bấm vào nút ở vị trí index {button_index_to_click}", flush=True)
-                time.sleep(2) # Thêm độ trễ nhỏ để đảm bảo nút sẵn sàng
+                time.sleep(2)
                 
                 click_button_by_index(bot_instance, message_data, button_index_to_click, "AUTO KVI")
-                # <<< KẾT THÚC THAY ĐỔI >>>
             else:
                 print(f"[AUTO KVI] LỖI: Không tìm thấy số trong câu trả lời của Gemini: '{api_text}'", flush=True)
 
@@ -477,6 +474,7 @@ Please respond with ONLY the number of the best option. For example: 3"""
         except Exception as e:
             print(f"[AUTO KVI] LỖI NGOẠI LỆ: Exception khi gọi Gemini: {e}", flush=True)
 
+    # =================== BẮT ĐẦU KHỐI CODE ĐÃ SỬA ===================
     @bot.gateway.command
     def on_message(resp):
         nonlocal last_action_time, last_api_call_time
@@ -490,9 +488,8 @@ Please respond with ONLY the number of the best option. For example: 3"""
         if not (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == KVI_CHANNEL_ID): return
 
         current_time = time.time()
-        if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
-            return
         
+        # Cập nhật thời gian hoạt động tổng thể (dùng cho timeout 7200s)
         last_action_time = time.time()
         
         embeds = m.get("embeds", [])
@@ -501,8 +498,13 @@ Please respond with ONLY the number of the best option. For example: 3"""
             embed = embeds[0]
             desc = embed.get("description", "")
             
+            # --- XỬ LÝ KHI CÓ CÂU HỎI ---
             question_match = re.search(r'["“](.+?)["”]', desc)
             if question_match:
+                # Di chuyển kiểm tra cooldown vào đây
+                if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
+                    return # Bỏ qua nếu đang trong thời gian chờ để tránh spam API
+
                 question = question_match.group(1)
                 options = []
                 options_part = desc.split(question_match.group(0))[-1]
@@ -512,13 +514,17 @@ Please respond with ONLY the number of the best option. For example: 3"""
                         options.append(cleaned_line)
 
                 if question and options:
-                    last_api_call_time = time.time()
+                    last_api_call_time = time.time() # Đặt lại thời gian chờ NGAY TRƯỚC KHI gọi AI
                     action_taken = True
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options)).start()
                     return
 
+            # Xử lý dạng câu hỏi thứ hai (ít gặp hơn)
             fields = embed.get("fields", [])
             if not action_taken and desc.startswith('"') and fields:
+                if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
+                    return
+
                 question = desc.strip('"')
                 options = [f.get("value", "") for f in fields if f.get("name", "").isdigit()]
                 if question and options:
@@ -527,17 +533,23 @@ Please respond with ONLY the number of the best option. For example: 3"""
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options)).start()
                     return
 
+        # --- XỬ LÝ KHI KHÔNG CÓ CÂU HỎI (Bấm nút mặc định như "Talk") ---
         if not action_taken:
+            # Thêm kiểm tra cooldown ở đây để tránh click liên tục nếu bị kẹt
+            if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
+                return
+
             components = m.get("components", [])
             all_buttons = [button for row in components for button in row.get("components", [])]
             button_priority_order = ["Talk", "Actions", "Date", "Propose", "Continue"]
             
             for label in button_priority_order:
                 target_button = next((btn for btn in all_buttons if btn.get("label") == label), None)
-                if target_button and target_button.get("custom_id"):
-                    last_api_call_time = time.time()
+                if target_button and target_button.get("custom_id") and not target_button.get("disabled"):
+                    last_api_call_time = time.time() # Đặt lại thời gian chờ khi bấm nút "Talk"
                     threading.Thread(target=send_interaction, args=(bot, m, target_button.get("custom_id"), "AUTO KVI")).start()
                     return
+    # =================== KẾT THÚC KHỐI CODE ĐÃ SỬA ===================
 
     def periodic_kvi_sender():
         nonlocal last_action_time
