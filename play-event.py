@@ -190,7 +190,7 @@ def click_button_by_index(bot, message_data, index, source=""):
         custom_id = button_to_click.get("custom_id")
         if not custom_id: return False
         headers = {"Authorization": TOKEN}
-        max_retries = 40
+        max_retries = 10
         for attempt in range(max_retries):
             session_id = bot.gateway.session_id
             payload = { "type": 3, "guild_id": message_data.get("guild_id"), "channel_id": message_data.get("channel_id"), "message_id": message_data.get("id"), "application_id": application_id, "session_id": session_id, "data": {"component_type": 2, "custom_id": custom_id} }
@@ -1124,4 +1124,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
