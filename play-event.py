@@ -89,21 +89,14 @@ def save_settings():
             return False
 
         settings_to_save = {
-            # Trạng thái chạy
             'is_event_bot_running': is_event_bot_running,
             'is_auto_kd_running': is_auto_kd_running,
             'is_autoclick_running': is_autoclick_running,
             'is_auto_kvi_running': is_auto_kvi_running,
-            
-            # Cài đặt loop
             'is_hourly_loop_enabled': is_hourly_loop_enabled,
             'loop_delay_seconds': loop_delay_seconds,
-            
-            # Spam panels
             'spam_panels': spam_panels,
             'panel_id_counter': panel_id_counter,
-            
-            # Autoclick settings
             'autoclick_button_index': autoclick_button_index,
             'autoclick_count': autoclick_count,
             'autoclick_clicks_done': autoclick_clicks_done
@@ -146,26 +139,18 @@ def load_settings():
             if req.status_code == 200:
                 settings = req.json()
                 if settings and isinstance(settings, dict):
-                    # Load trạng thái chạy
                     is_event_bot_running = settings.get('is_event_bot_running', False)
                     is_auto_kd_running = settings.get('is_auto_kd_running', False)
                     is_autoclick_running = settings.get('is_autoclick_running', False)
                     is_auto_kvi_running = settings.get('is_auto_kvi_running', False)
-                    
-                    # Load cài đặt loop
                     is_hourly_loop_enabled = settings.get('is_hourly_loop_enabled', False)
                     loop_delay_seconds = settings.get('loop_delay_seconds', 3600)
-                    
-                    # Load spam panels
                     spam_panels = settings.get('spam_panels', [])
                     panel_id_counter = settings.get('panel_id_counter', 0)
-                    
-                    # Load autoclick settings
                     autoclick_button_index = settings.get('autoclick_button_index', 0)
                     autoclick_count = settings.get('autoclick_count', 0)
                     autoclick_clicks_done = settings.get('autoclick_clicks_done', 0)
                     
-                    # Đảm bảo panel_id_counter đúng
                     if spam_panels:
                         max_id = max(p.get('id', -1) for p in spam_panels)
                         panel_id_counter = max(panel_id_counter, max_id + 1)
@@ -242,15 +227,7 @@ def send_interaction(bot, message_data, custom_id, source=""):
         
         for attempt in range(max_retries):
             session_id = bot.gateway.session_id
-            payload = { 
-                "type": 3, 
-                "guild_id": message_data.get("guild_id"), 
-                "channel_id": message_data.get("channel_id"), 
-                "message_id": message_data.get("id"), 
-                "application_id": application_id, 
-                "session_id": session_id, 
-                "data": {"component_type": 2, "custom_id": custom_id} 
-            }
+            payload = { "type": 3, "guild_id": message_data.get("guild_id"), "channel_id": message_data.get("channel_id"), "message_id": message_data.get("id"), "application_id": application_id, "session_id": session_id, "data": {"component_type": 2, "custom_id": custom_id} }
             
             print(f"[{source}] INFO (Lần {attempt + 1}/{max_retries}): Chuẩn bị click button (ID: {custom_id})", flush=True)
             
@@ -446,7 +423,6 @@ def run_auto_kd_thread():
 def run_auto_kvi_thread():
     global is_auto_kvi_running, auto_kvi_instance
     
-    # Pre-flight checks
     if not KVI_CHANNEL_ID:
         print("[AUTO KVI] LỖI: Chưa cấu hình KVI_CHANNEL_ID.", flush=True)
         with lock: is_auto_kvi_running = False; save_settings()
@@ -460,7 +436,7 @@ def run_auto_kvi_thread():
     with lock: auto_kvi_instance = bot
     
     last_action_time = time.time()
-    KVI_TIMEOUT_SECONDS = 7200 # 2 hours
+    KVI_TIMEOUT_SECONDS = 7200
     
     def answer_question_with_gemini(bot_instance, message_data, question, options, answer_style='custom_id'):
         print(f"[AUTO KVI] GEMINI: Nhận được câu hỏi: '{question}'", flush=True)
@@ -479,33 +455,34 @@ Please respond with ONLY the number of the best option. For example: 3"""
             match = re.search(r'\d+', response.text)
             if match:
                 selected_option = int(match.group(0))
+                print(f"[AUTO KVI LOG] Gemini đã trả về số: {selected_option}", flush=True)
                 if not (1 <= selected_option <= len(options)):
-                    print(f"[AUTO KVI] LỖI: Gemini trả về số không hợp lệ: {selected_option}", flush=True)
+                    print(f"[AUTO KVI LOG] LỖI: Gemini trả về số không hợp lệ: {selected_option}", flush=True)
                     return
                 
                 print(f"[AUTO KVI] GEMINI: Gemini đã chọn câu trả lời số {selected_option}: '{options[selected_option-1]}'", flush=True)
                 
                 custom_id_to_click = None
-                if answer_style == 'custom_id': # Xử lý kiểu cũ, custom_id là 'kvi_answer_x'
+                if answer_style == 'custom_id':
                     custom_id_to_click = f"kvi_answer_{selected_option-1}"
-                elif answer_style == 'button_label': # Xử lý kiểu mới, tìm nút có nhãn là số đã chọn
+                elif answer_style == 'button_label':
                     all_buttons = [button for row in message_data.get("components", []) for button in row.get("components", [])]
                     target_button = next((btn for btn in all_buttons if btn.get("label") == str(selected_option)), None)
+                    print(f"[AUTO KVI LOG] Đang tìm nút có label '{selected_option}'. Kết quả: {'Tìm thấy' if target_button else 'KHÔNG TÌM THẤY'}", flush=True)
                     if target_button:
                         custom_id_to_click = target_button.get("custom_id")
-
+                
+                print(f"[AUTO KVI LOG] Custom ID để click là: {custom_id_to_click}", flush=True)
                 if custom_id_to_click:
-                    # <<< START SỬA LỖI >>>
-                    print(f"[AUTO KVI] Đã xác định nút bấm. Chờ 2 giây trước khi click để tránh lỗi timing...", flush=True)
+                    print(f"[AUTO KVI LOG] Chờ 2 giây trước khi click để tránh lỗi timing...", flush=True)
                     time.sleep(2) 
-                    # <<< END SỬA LỖI >>>
                     send_interaction(bot_instance, message_data, custom_id_to_click, "AUTO KVI")
                 else:
-                    print(f"[AUTO KVI] LỖI: Không tìm thấy nút bấm tương ứng với lựa chọn {selected_option}", flush=True)
+                    print(f"[AUTO KVI LOG] LỖI: Không tìm thấy nút bấm tương ứng với lựa chọn {selected_option}", flush=True)
             else:
-                print(f"[AUTO KVI] LỖI: Không tìm thấy số trong câu trả lời của Gemini: '{response.text}'", flush=True)
+                print(f"[AUTO KVI LOG] LỖI: Không tìm thấy số trong câu trả lời của Gemini: '{response.text}'", flush=True)
         except Exception as e:
-            print(f"[AUTO KVI] LỖI: Exception khi gọi Gemini: {e}", flush=True)
+            print(f"[AUTO KVI LOG] LỖI NGOẠI LỆ: Exception khi gọi Gemini: {e}", flush=True)
 
     @bot.gateway.command
     def on_message(resp):
@@ -519,40 +496,47 @@ Please respond with ONLY the number of the best option. For example: 3"""
         m = resp.parsed.auto()
         if not (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == KVI_CHANNEL_ID): return
         
+        print("\n[AUTO KVI LOG] --- Tin nhắn mới từ Karuta ---", flush=True)
         last_action_time = time.time()
         
-        # ƯU TIÊN 1: TÌM CÂU HỎI ĐỂ TRẢ LỜI
         embeds = m.get("embeds", [])
         if embeds:
             embed = embeds[0]
             desc = embed.get("description", "")
-            fields = embed.get("fields", [])
-            
-            # Xử lý câu hỏi trong description (như trong ảnh)
-            if desc.startswith('"') and '1️⃣' in desc:
+            print(f"[AUTO KVI LOG] Description Embed: {desc.replace(chr(10), '<NL>')}", flush=True)
+
+            # PHÂN TÍCH CÂU HỎI TRONG DESCRIPTION (PHIÊN BẢN MỚI, BỀN VỮNG)
+            if desc.startswith('"') and '\n' in desc:
+                print("[AUTO KVI LOG] Điều kiện nhận diện câu hỏi thỏa mãn (bắt đầu bằng \" và có xuống dòng).", flush=True)
                 lines = desc.split('\n')
                 question = lines[0].strip('"')
                 options = []
                 for line in lines[1:]:
-                    cleaned_line = re.sub(r'^\s*\d️⃣\s*', '', line).strip()
-                    if cleaned_line:
+                    # Xóa mọi ký tự không phải chữ cái ở đầu dòng (loại bỏ mọi emoji, số, ký tự đặc biệt)
+                    cleaned_line = re.sub(r'^\s*[^a-zA-Z]+', '', line).strip()
+                    if cleaned_line and "Choose the response" not in cleaned_line:
                         options.append(cleaned_line)
+                
+                print(f"[AUTO KVI LOG] Đã trích xuất -> Câu hỏi: '{question}'", flush=True)
+                print(f"[AUTO KVI LOG] Đã trích xuất -> Lựa chọn: {options}", flush=True)
 
                 if question and options:
-                    print("[AUTO KVI] INFO: Phát hiện câu hỏi 'description'. Chuyển cho Gemini...", flush=True)
+                    print("[AUTO KVI LOG] Dữ liệu hợp lệ -> Gửi cho Gemini...", flush=True)
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'button_label')).start()
                     return
 
-            # Xử lý câu hỏi trong fields (kiểu cũ)
+            # XỬ LÝ CÂU HỎI TRONG FIELDS (KIỂU CŨ)
+            fields = embed.get("fields", [])
             if desc.startswith('"') and fields:
+                print("[AUTO KVI LOG] Phát hiện câu hỏi kiểu 'fields'.", flush=True)
                 question = desc.strip('"')
                 options = [f.get("value", "") for f in fields if f.get("name", "").isdigit()]
                 if question and options:
-                    print("[AUTO KVI] INFO: Phát hiện câu hỏi 'fields'. Chuyển cho Gemini...", flush=True)
+                    print("[AUTO KVI LOG] Dữ liệu hợp lệ -> Gửi cho Gemini...", flush=True)
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'custom_id')).start()
                     return
-
-        # ƯU TIÊN 2: NẾU KHÔNG CÓ CÂU HỎI, MỚI BẤM CÁC NÚT HÀNH ĐỘNG
+        
+        print("[AUTO KVI LOG] Không phát hiện câu hỏi, kiểm tra các nút hành động...", flush=True)
         components = m.get("components", [])
         all_buttons = [button for row in components for button in row.get("components", [])]
         button_priority_order = ["Talk", "Actions", "Date", "Propose", "Continue"]
@@ -560,7 +544,7 @@ Please respond with ONLY the number of the best option. For example: 3"""
         for label in button_priority_order:
             target_button = next((btn for btn in all_buttons if btn.get("label") == label), None)
             if target_button and target_button.get("custom_id"):
-                print(f"[AUTO KVI] INFO: Phát hiện nút hành động '{label}'. Chuẩn bị click...", flush=True)
+                print(f"[AUTO KVI LOG] Phát hiện nút hành động '{label}'. Chuẩn bị click...", flush=True)
                 threading.Thread(target=send_interaction, args=(bot, m, target_button.get("custom_id"), "AUTO KVI")).start()
                 return
 
@@ -1072,14 +1056,7 @@ def get_panels():
 def add_panel():
     global panel_id_counter
     with lock:
-        new_panel = { 
-            "id": panel_id_counter, 
-            "message": "", 
-            "channel_id": "", 
-            "delay": 60, 
-            "is_active": False, 
-            "last_spam_time": 0 
-        }
+        new_panel = { "id": panel_id_counter, "message": "", "channel_id": "", "delay": 60, "is_active": False, "last_spam_time": 0 }
         spam_panels.append(new_panel)
         panel_id_counter += 1
         save_result = save_settings()
@@ -1091,7 +1068,6 @@ def update_panel():
     with lock:
         for panel in spam_panels:
             if panel['id'] == data['id']:
-                # Reset timer if toggled on
                 if data.get('is_active') and not panel.get('is_active'):
                     data['last_spam_time'] = 0
                 panel.update(data)
