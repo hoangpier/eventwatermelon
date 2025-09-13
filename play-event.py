@@ -446,6 +446,7 @@ def run_auto_kd_thread():
 def run_auto_kvi_thread():
     global is_auto_kvi_running, auto_kvi_instance
     
+    # Pre-flight checks
     if not KVI_CHANNEL_ID:
         print("[AUTO KVI] LỖI: Chưa cấu hình KVI_CHANNEL_ID.", flush=True)
         with lock: is_auto_kvi_running = False; save_settings()
@@ -459,9 +460,9 @@ def run_auto_kvi_thread():
     with lock: auto_kvi_instance = bot
     
     last_action_time = time.time()
-    KVI_TIMEOUT_SECONDS = 7200
+    KVI_TIMEOUT_SECONDS = 7200 # 2 hours
     
-    def answer_question_with_gemini(bot_instance, message_data, question, options):
+    def answer_question_with_gemini(bot_instance, message_data, question, options, answer_style='custom_id'):
         print(f"[AUTO KVI] GEMINI: Nhận được câu hỏi: '{question}'", flush=True)
         prompt = f"""You are an expert in the Discord game Karuta's KVI (Karuta Visit Interaction). Your goal is to choose the best, most positive, or most logical answer to continue a friendly conversation.
 Based on the following question, choose the best answer from the options provided.
@@ -478,12 +479,25 @@ Please respond with ONLY the number of the best option. For example: 3"""
             match = re.search(r'\d+', response.text)
             if match:
                 selected_option = int(match.group(0))
-                if 1 <= selected_option <= len(options):
-                    print(f"[AUTO KVI] GEMINI: Gemini đã chọn câu trả lời số {selected_option}: '{options[selected_option-1]}'", flush=True)
+                if not (1 <= selected_option <= len(options)):
+                    print(f"[AUTO KVI] LỖI: Gemini trả về số không hợp lệ: {selected_option}", flush=True)
+                    return
+                
+                print(f"[AUTO KVI] GEMINI: Gemini đã chọn câu trả lời số {selected_option}: '{options[selected_option-1]}'", flush=True)
+                
+                custom_id_to_click = None
+                if answer_style == 'custom_id': # Xử lý kiểu cũ, custom_id là 'kvi_answer_x'
                     custom_id_to_click = f"kvi_answer_{selected_option-1}"
+                elif answer_style == 'button_label': # Xử lý kiểu mới, tìm nút có nhãn là số đã chọn
+                    all_buttons = [button for row in message_data.get("components", []) for button in row.get("components", [])]
+                    target_button = next((btn for btn in all_buttons if btn.get("label") == str(selected_option)), None)
+                    if target_button:
+                        custom_id_to_click = target_button.get("custom_id")
+
+                if custom_id_to_click:
                     send_interaction(bot_instance, message_data, custom_id_to_click, "AUTO KVI")
                 else:
-                    print(f"[AUTO KVI] LỖI: Gemini trả về số không hợp lệ: {selected_option}", flush=True)
+                    print(f"[AUTO KVI] LỖI: Không tìm thấy nút bấm tương ứng với lựa chọn {selected_option}", flush=True)
             else:
                 print(f"[AUTO KVI] LỖI: Không tìm thấy số trong câu trả lời của Gemini: '{response.text}'", flush=True)
         except Exception as e:
@@ -509,14 +523,31 @@ Please respond with ONLY the number of the best option. For example: 3"""
             desc = embed.get("description", "")
             fields = embed.get("fields", [])
             
+            # --- LOGIC MỚI: Xử lý câu hỏi trong description (như trong ảnh) ---
+            if desc.startswith('"') and '1️⃣' in desc:
+                lines = desc.split('\n')
+                question = lines[0].strip('"')
+                options = []
+                for line in lines[1:]:
+                    cleaned_line = re.sub(r'^\s*\d️⃣\s*', '', line).strip()
+                    if cleaned_line:
+                        options.append(cleaned_line)
+
+                if question and options:
+                    print("[AUTO KVI] INFO: Phát hiện câu hỏi kiểu 'description'. Chuyển cho Gemini...", flush=True)
+                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'button_label')).start()
+                    return
+
+            # --- LOGIC CŨ: Xử lý câu hỏi trong fields ---
             if desc.startswith('"') and fields:
                 question = desc.strip('"')
                 options = [f.get("value", "") for f in fields if f.get("name", "").isdigit()]
                 if question and options:
-                    print("[AUTO KVI] INFO: Phát hiện câu hỏi. Chuyển cho Gemini...", flush=True)
-                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options)).start()
+                    print("[AUTO KVI] INFO: Phát hiện câu hỏi kiểu 'fields'. Chuyển cho Gemini...", flush=True)
+                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'custom_id')).start()
                     return
 
+        # Xử lý các nút bấm thông thường (Talk, Actions,...)
         components = m.get("components", [])
         all_buttons = [button for row in components for button in row.get("components", [])]
         button_priority_order = ["Talk", "Actions", "Date", "Propose", "Continue"]
@@ -531,8 +562,8 @@ Please respond with ONLY the number of the best option. For example: 3"""
     def periodic_kvi_sender():
         nonlocal last_action_time
         time.sleep(10)
-        bot.sendMessage(KVI_CHANNEL_ID, "kvi")
         print("[AUTO KVI] INFO: Gửi 'kvi' lần đầu.", flush=True)
+        bot.sendMessage(KVI_CHANNEL_ID, "kvi")
         last_action_time = time.time()
         
         while True:
