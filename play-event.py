@@ -423,257 +423,155 @@ def run_auto_kvi_thread():
     bot = discum.Client(token=TOKEN, log=False)
     with lock: auto_kvi_instance = bot
     
-    # Thời gian theo dõi và cooldown
     last_action_time = time.time()
-    last_api_call_time = 0
-    last_kvi_send_time = 0
-    KVI_COOLDOWN_SECONDS = 3  # Giảm từ 5 xuống 3 để phản hồi nhanh hơn
-    KVI_TIMEOUT_SECONDS = 600  # Giảm từ 7200 xuống 600 (10 phút)
+    last_api_call_time = 0 
+    KVI_COOLDOWN_SECONDS = 5
+    KVI_TIMEOUT_SECONDS = 7200
     
     def answer_question_with_gemini(bot_instance, message_data, question, options):
-        nonlocal last_api_call_time
         print(f"[AUTO KVI] GEMINI: Nhận được câu hỏi: '{question}'", flush=True)
         
         try:
-            # Extract character name from embed
-            character_name = "Unknown"
-            embed = message_data.get("embeds", [{}])[0]
-            desc = embed.get("description", "")
-            embed_title = embed.get("title", "")
-            
-            if "Character:" in desc:
-                char_match = re.search(r'Character:\s*([^(]+)', desc)
-                if char_match:
-                    character_name = char_match.group(1).strip()
-            elif embed_title:
-                character_name = embed_title.replace("Visit Character", "").strip()
-            
-            # Prompt được tối ưu hóa cho KVI với thông tin nhân vật
-            prompt = f"""You are playing Karuta's KVI (Visit Character) system. You are interacting with the character: {character_name}
+            prompt = f"""You are an expert in the Discord game Karuta's KVI (Karuta Visit Interaction). Your goal is to choose the best, most positive, or most logical answer to continue a friendly conversation.
+Based on the following question, choose the best answer from the options provided.
 
-Your goal is to choose the BEST response to build affection and have a positive interaction with {character_name}.
+Question: "{question}"
 
-IMPORTANT RULES:
-1. Choose responses that show interest, care, or positive engagement with {character_name}
-2. Consider the character's personality if you know it
-3. Avoid negative, dismissive, or rude responses
-4. Pick answers that would naturally continue the conversation
-5. Prefer romantic or friendly options over neutral ones
-6. Choose responses that would make {character_name} happy or interested
-
-Question from {character_name}: "{question}"
-
-Available response options:
+Options:
 {chr(10).join([f"{i+1}. {opt}" for i, opt in enumerate(options)])}
 
-Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affection with {character_name}."""
+Please respond with ONLY the number of the best option. For example: 3"""
 
             payload = { "contents": [{"parts": [{"text": prompt}]}] }
             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
             
-            response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload, timeout=15)
+            response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload, timeout=20)
             response.raise_for_status()
             
             result = response.json()
-            api_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+            api_text = result['candidates'][0]['content']['parts'][0]['text']
             
-            # Tìm số trong phản hồi
-            match = re.search(r'(\d+)', api_text)
+            match = re.search(r'\d+', api_text)
             if match:
-                selected_option = int(match.group(1))
-                if 1 <= selected_option <= len(options):
-                    print(f"[AUTO KVI] GEMINI: Chọn đáp án {selected_option}: '{options[selected_option-1]}'", flush=True)
-                    
-                    # Click button với delay ngắn hơn
-                    time.sleep(random.uniform(1.5, 2.5))
-                    success = click_button_by_index(bot_instance, message_data, selected_option - 1, "AUTO KVI")
-                    
-                    if success:
-                        last_api_call_time = time.time()
-                        print("[AUTO KVI] INFO: Đã click thành công!", flush=True)
-                    else:
-                        print("[AUTO KVI] WARN: Click thất bại, sẽ thử lại sau", flush=True)
-                else:
-                    print(f"[AUTO KVI] LỖI: Gemini chọn số không hợp lệ: {selected_option}", flush=True)
-                    # Fallback: chọn option đầu tiên
-                    click_button_by_index(bot_instance, message_data, 0, "AUTO KVI")
+                selected_option = int(match.group(0))
+                if not (1 <= selected_option <= len(options)):
+                    print(f"[AUTO KVI] LỖI: Gemini trả về số không hợp lệ: {selected_option}", flush=True)
+                    return
+                
+                print(f"[AUTO KVI] GEMINI: Gemini đã chọn câu trả lời số {selected_option}: '{options[selected_option-1]}'", flush=True)
+                
+                button_index_to_click = selected_option - 1
+                
+                print(f"[AUTO KVI] INFO: Sẽ bấm vào nút ở vị trí index {button_index_to_click}", flush=True)
+                time.sleep(2)
+                
+                click_button_by_index(bot_instance, message_data, button_index_to_click, "AUTO KVI")
             else:
-                print(f"[AUTO KVI] LỖI: Không tìm thấy số trong phản hồi: '{api_text}'", flush=True)
-                # Fallback: chọn option đầu tiên
-                click_button_by_index(bot_instance, message_data, 0, "AUTO KVI")
+                print(f"[AUTO KVI] LỖI: Không tìm thấy số trong câu trả lời của Gemini: '{api_text}'", flush=True)
 
         except requests.exceptions.RequestException as e:
-            print(f"[AUTO KVI] LỖI API: {e}", flush=True)
-            # Fallback: chọn option đầu tiên khi API lỗi
-            click_button_by_index(bot_instance, message_data, 0, "AUTO KVI")
+            print(f"[AUTO KVI] LỖI YÊU CẦU API: {e}", flush=True)
         except Exception as e:
-            print(f"[AUTO KVI] LỖI NGOẠI LỆ: {e}", flush=True)
-            click_button_by_index(bot_instance, message_data, 0, "AUTO KVI")
+            print(f"[AUTO KVI] LỖI NGOẠI LỆ: Exception khi gọi Gemini: {e}", flush=True)
 
-    def smart_button_click(bot_instance, message_data):
-        """Click button thông minh với thứ tự ưu tiên"""
-        nonlocal last_api_call_time
-        
-        components = message_data.get("components", [])
-        all_buttons = [button for row in components for button in row.get("components", [])]
-        
-        # Thứ tự ưu tiên button (có thể điều chỉnh)
-        button_priority = ["Talk", "Actions", "Date", "Propose", "Continue", "Next"]
-        
-        for label in button_priority:
-            target_button = next((btn for btn in all_buttons 
-                                  if btn.get("label") == label and 
-                                  btn.get("custom_id") and 
-                                  not btn.get("disabled")), None)
-            if target_button:
-                print(f"[AUTO KVI] INFO: Click button '{label}'", flush=True)
-                time.sleep(random.uniform(1.0, 2.0))
-                success = send_interaction(bot_instance, message_data, target_button.get("custom_id"), "AUTO KVI")
-                if success:
-                    last_api_call_time = time.time()
-                return
-        
-        # Nếu không tìm thấy button ưu tiên, click button đầu tiên có thể click
-        for button in all_buttons:
-            if button.get("custom_id") and not button.get("disabled"):
-                print(f"[AUTO KVI] INFO: Click button đầu tiên khả dụng", flush=True)
-                time.sleep(random.uniform(1.0, 2.0))
-                success = send_interaction(bot_instance, message_data, button.get("custom_id"), "AUTO KVI")
-                if success:
-                    last_api_call_time = time.time()
-                return
-
+    # =================== BẮT ĐẦU KHỐI CODE ĐÃ SỬA ===================
     @bot.gateway.command
     def on_message(resp):
-        nonlocal last_action_time, last_api_call_time, last_kvi_send_time
+        nonlocal last_action_time, last_api_call_time
 
         with lock:
-            if not is_auto_kvi_running: 
-                bot.gateway.close()
-                return
+            if not is_auto_kvi_running: return
         
-        if not (resp.event.message or resp.event.message_updated): 
-            return
+        if not (resp.event.message or resp.event.message_updated): return
         
         m = resp.parsed.auto()
-        if not (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == KVI_CHANNEL_ID): 
-            return
+        if not (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == KVI_CHANNEL_ID): return
 
         current_time = time.time()
-        last_action_time = current_time  # Cập nhật thời gian hoạt động
-
-        # Kiểm tra cooldown để tránh spam
-        if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
-            return
-
+        
+        # Cập nhật thời gian hoạt động tổng thể (dùng cho timeout 7200s)
+        last_action_time = time.time()
+        
         embeds = m.get("embeds", [])
-        if not embeds:
-            return
-
-        embed = embeds[0]
-        desc = embed.get("description", "")
-        
-        # Kiểm tra các dạng câu hỏi khác nhau
-        question_patterns = [
-            r'["“](.+?)["”]',  # "Question text" or “Question text”
-            r'"([^"]+)"',       # Standard quotes
-        ]
-        
-        question_found = False
-        for pattern in question_patterns:
-            question_match = re.search(pattern, desc, re.DOTALL)
+        action_taken = False
+        if embeds:
+            embed = embeds[0]
+            desc = embed.get("description", "")
+            
+            # --- XỬ LÝ KHI CÓ CÂU HỎI ---
+            question_match = re.search(r'["“](.+?)["”]', desc)
             if question_match:
-                question = question_match.group(1).strip()
-                
-                # Tìm các option
-                options = []
-                
-                # Method 1: Tìm trong description sau câu hỏi
-                options_part = desc.split(question_match.group(0), 1)
-                if len(options_part) > 1:
-                    for line in options_part[1].split('\n'):
-                        # Loại bỏ số thứ tự và ký tự đặc biệt ở đầu
-                        cleaned_line = re.sub(r'^\s*[^\w\s]*\s*\d*\s*[^\w\s]*\s*', '', line).strip()
-                        if cleaned_line and len(cleaned_line) > 5 and "Choose" not in cleaned_line:
-                            options.append(cleaned_line)
-                
-                # Method 2: Tìm trong fields nếu không tìm thấy trong description
-                if len(options) < 2:
-                    fields = embed.get("fields", [])
-                    options = []
-                    for field in fields:
-                        if field.get("name", "").isdigit():
-                            value = field.get("value", "").strip()
-                            if value:
-                                options.append(value)
-                
-                if question and len(options) >= 2:
-                    print(f"[AUTO KVI] INFO: Tìm thấy câu hỏi với {len(options)} lựa chọn", flush=True)
-                    question_found = True
-                    threading.Thread(target=answer_question_with_gemini, 
-                                     args=(bot, m, question, options), 
-                                     daemon=True).start()
-                    break
+                # Di chuyển kiểm tra cooldown vào đây
+                if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
+                    return # Bỏ qua nếu đang trong thời gian chờ để tránh spam API
 
-        # Nếu không phải câu hỏi, click button thông thường
-        if not question_found:
-            # Kiểm tra xem có phải thông báo kết thúc hay không
-            if "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
-                print("[AUTO KVI] INFO: Phiên KVI kết thúc, chuẩn bị gửi kvi mới", flush=True)
-                # Delay trước khi gửi kvi mới
-                time.sleep(random.uniform(10, 15))
-                try:
-                    bot.sendMessage(KVI_CHANNEL_ID, "kvi")
-                    last_kvi_send_time = time.time() # FIX: Đồng bộ hóa timer
-                    print("[AUTO KVI] INFO: Đã gửi lệnh kvi mới", flush=True)
-                except Exception as e:
-                    print(f"[AUTO KVI] LỖI: Không thể gửi kvi: {e}", flush=True)
-            else:
-                # Click button thông thường
-                threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
+                question = question_match.group(1)
+                options = []
+                options_part = desc.split(question_match.group(0))[-1]
+                for line in options_part.split('\n'):
+                    cleaned_line = re.sub(r'^\s*[^a-zA-Z]+', '', line).strip()
+                    if cleaned_line and "Choose the response" not in cleaned_line:
+                        options.append(cleaned_line)
+
+                if question and options:
+                    last_api_call_time = time.time() # Đặt lại thời gian chờ NGAY TRƯỚC KHI gọi AI
+                    action_taken = True
+                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options)).start()
+                    return
+
+            # Xử lý dạng câu hỏi thứ hai (ít gặp hơn)
+            fields = embed.get("fields", [])
+            if not action_taken and desc.startswith('"') and fields:
+                if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
+                    return
+
+                question = desc.strip('"')
+                options = [f.get("value", "") for f in fields if f.get("name", "").isdigit()]
+                if question and options:
+                    last_api_call_time = time.time()
+                    action_taken = True
+                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options)).start()
+                    return
+
+        # --- XỬ LÝ KHI KHÔNG CÓ CÂU HỎI (Bấm nút mặc định như "Talk") ---
+        if not action_taken:
+            # Thêm kiểm tra cooldown ở đây để tránh click liên tục nếu bị kẹt
+            if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
+                return
+
+            components = m.get("components", [])
+            all_buttons = [button for row in components for button in row.get("components", [])]
+            button_priority_order = ["Talk", "Actions", "Date", "Propose", "Continue"]
+            
+            for label in button_priority_order:
+                target_button = next((btn for btn in all_buttons if btn.get("label") == label), None)
+                if target_button and target_button.get("custom_id") and not target_button.get("disabled"):
+                    last_api_call_time = time.time() # Đặt lại thời gian chờ khi bấm nút "Talk"
+                    threading.Thread(target=send_interaction, args=(bot, m, target_button.get("custom_id"), "AUTO KVI")).start()
+                    return
+    # =================== KẾT THÚC KHỐI CODE ĐÃ SỬA ===================
 
     def periodic_kvi_sender():
-        """Gửi kvi định kỳ và kiểm tra timeout"""
-        nonlocal last_action_time, last_kvi_send_time
-        
-        # Gửi kvi đầu tiên sau 10 giây
+        nonlocal last_action_time
         time.sleep(10)
-        try:
-            bot.sendMessage(KVI_CHANNEL_ID, "kvi")
-            last_kvi_send_time = time.time()
-            last_action_time = time.time()
-            print("[AUTO KVI] INFO: Gửi lệnh kvi khởi tạo", flush=True)
-        except Exception as e:
-            print(f"[AUTO KVI] LỖI: Không thể gửi kvi khởi tạo: {e}", flush=True)
+        bot.sendMessage(KVI_CHANNEL_ID, "kvi")
+        last_action_time = time.time()
         
         while True:
             with lock:
-                if not is_auto_kvi_running: 
-                    break
+                if not is_auto_kvi_running: break
             
-            current_time = time.time()
+            if time.time() - last_action_time > KVI_TIMEOUT_SECONDS:
+                 bot.sendMessage(KVI_CHANNEL_ID, "kvi")
+                 last_action_time = time.time()
             
-            # CHỈ gửi kvi khi timeout (không có hoạt động trong 10 phút)
-            if current_time - last_action_time > KVI_TIMEOUT_SECONDS:
-                # Kiểm tra thêm điều kiện: phải cách lần gửi kvi cuối ít nhất 5 phút
-                if current_time - last_kvi_send_time > 300:  # 5 phút = 300 giây
-                    try:
-                        bot.sendMessage(KVI_CHANNEL_ID, "kvi")
-                        last_action_time = current_time
-                        last_kvi_send_time = current_time
-                        print("[AUTO KVI] INFO: Timeout - gửi kvi để khởi động lại", flush=True)
-                    except Exception as e:
-                        print(f"[AUTO KVI] LỖI: Không thể gửi kvi timeout: {e}", flush=True)
-                else:
-                     print("[AUTO KVI] INFO: Timeout nhưng vừa mới gửi kvi, bỏ qua", flush=True)
-            
-            time.sleep(60)  # Kiểm tra mỗi 60 giây thay vì 30 giây
+            time.sleep(60)
 
     @bot.gateway.command
     def on_ready(resp):
         if resp.event.ready_supplemental:
-            print(f"[AUTO KVI] Gateway sẵn sàng. Theo dõi kênh {KVI_CHANNEL_ID}...", flush=True)
-            threading.Thread(target=periodic_kvi_sender, daemon=True).start()
+             print("[AUTO KVI] Gateway sẵn sàng.", flush=True)
+             threading.Thread(target=periodic_kvi_sender, daemon=True).start()
 
     print("[AUTO KVI] Luồng Auto KVI đã khởi động...", flush=True)
     try:
@@ -812,6 +710,23 @@ HTML_TEMPLATE = """
     <div id="saveStatus" class="save-status"></div>
     <h1>Karuta Bot Control</h1>
     <p>Chọn một chế độ để chạy. Các chế độ chính (Auto Play, Auto Click, Auto KVI) không thể chạy cùng lúc.</p>
+
+    <div class="panel" style="max-width: 840px; text-align: left; background-color: #2a2a2a; padding: 25px; margin-bottom: 20px;">
+        <h2 style="text-align: center; margin-top: 0;">🛒 <strong>BUYING PRICE LIST</strong> 🛒</h2>
+        <pre style="font-family: Consolas, 'Courier New', monospace; color: #e0e0e0; font-size: 1.1em; white-space: pre-wrap; line-height: 1.6;">
+══════════════════════════
+<strong>MATERIALS</strong>
+▸ Buying <strong>Gems</strong> 💎 | 17 Gems = 1 Ticket 🎟️
+▸ Buying <strong>Gold</strong> 💰 | 3300 Gold = 1 Ticket 🎟️
+▸ Buying <strong>Bits</strong> ✨ | 2500 Bits = 1 Ticket 🎟️
+
+<strong>ORBS</strong>
+▸ Buying <strong>Swap Orb</strong> 🔮 | 3 Tickets 🎟️ = 1 Orb 
+▸ Buying <strong>Upgrade Orb</strong> 🔮 | 2 Tickets 🎟️ = 1 Orb
+══════════════════════════
+<strong>Ping or DM me if you're selling!</strong></pre>
+    </div>
+
     <div class="container">
         <div class="panel" id="event-bot-panel">
             <h2>Chế độ 1: Auto Play Event</h2>
