@@ -407,7 +407,7 @@ def run_auto_kvi_thread():
     last_api_call_time = 0
     last_kvi_send_time = 0
     KVI_COOLDOWN_SECONDS = 3
-    KVI_TIMEOUT_SECONDS = 600
+    KVI_TIMEOUT_SECONDS = 3605
 
     def answer_question_with_gemini(bot_instance, message_data, question, options):
         nonlocal last_api_call_time
@@ -1124,3 +1124,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
+
