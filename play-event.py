@@ -429,7 +429,6 @@ def run_auto_kvi_thread():
     last_kvi_send_time = 0
     KVI_COOLDOWN_SECONDS = 3  # Giảm từ 5 xuống 3 để phản hồi nhanh hơn
     KVI_TIMEOUT_SECONDS = 600  # Giảm từ 7200 xuống 600 (10 phút)
-    KVI_AUTO_SEND_INTERVAL = 600  # 10 phút tự động gửi kvi
     
     def answer_question_with_gemini(bot_instance, message_data, question, options):
         nonlocal last_api_call_time
@@ -546,7 +545,7 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
 
     @bot.gateway.command
     def on_message(resp):
-        nonlocal last_action_time, last_api_call_time
+        nonlocal last_action_time, last_api_call_time, last_kvi_send_time
 
         with lock:
             if not is_auto_kvi_running: 
@@ -625,6 +624,7 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
                 time.sleep(random.uniform(10, 15))
                 try:
                     bot.sendMessage(KVI_CHANNEL_ID, "kvi")
+                    last_kvi_send_time = time.time() # FIX: Đồng bộ hóa timer
                     print("[AUTO KVI] INFO: Đã gửi lệnh kvi mới", flush=True)
                 except Exception as e:
                     print(f"[AUTO KVI] LỖI: Không thể gửi kvi: {e}", flush=True)
