@@ -630,29 +630,64 @@ def run_hourly_loop_thread():
             save_settings()
         print("[HOURLY LOOP] Luồng vòng lặp đã dừng.", flush=True)
 
+def get_new_random_delay(panel):
+    # Use new minute-based keys if available
+    min_minutes = panel.get('delay_min_minutes', 4) # Default to 4 mins
+    max_minutes = panel.get('delay_max_minutes', 5) # Default to 5 mins
+    
+    # Fallback for old second-based keys
+    if 'delay_min' in panel:
+        min_minutes = round(panel['delay_min'] / 60)
+    if 'delay_max' in panel:
+        max_minutes = round(panel['delay_max'] / 60)
+
+    # Ensure min <= max
+    if min_minutes > max_minutes:
+        min_minutes, max_minutes = max_minutes, min_minutes
+
+    chosen_minutes = random.randint(min_minutes, max_minutes)
+    humanizer_seconds = random.randint(1, 2) # Add 1-15 extra seconds
+    
+    return (chosen_minutes * 60) + humanizer_seconds
+
 def spam_loop():
     bot = discum.Client(token=TOKEN, log=False)
     @bot.gateway.command
     def on_ready(resp):
         if resp.event.ready: print("[SPAM BOT] Gateway đã kết nối.", flush=True)
-    threading.Thread(target=bot.gateway.run, daemon=True).start()
-    time.sleep(5) 
+    
+    threading.Thread(target=bot.gateway.run, daemon=True, name="SpamGatewayThread").start()
+    
+    while not bot.gateway.session_id:
+        time.sleep(1)
+
     while True:
         try:
-            with lock: panels_to_process = list(spam_panels)
+            with lock:
+                panels_to_process = list(spam_panels)
+            
             for panel in panels_to_process:
-                if panel['is_active'] and panel['channel_id'] and panel['message']:
-                    if time.time() - panel['last_spam_time'] >= panel['delay']:
-                        try:
-                            bot.sendMessage(str(panel['channel_id']), str(panel['message']))
-                            with lock:
-                                for p in spam_panels:
-                                    if p['id'] == panel['id']: 
-                                        p['last_spam_time'] = time.time()
-                                        break
-                                save_settings()
-                        except Exception as e:
-                            print(f"LỖI SPAM: Không thể gửi tin. {e}", flush=True)
+                if panel.get('is_active') and panel.get('channel_id') and panel.get('message') and time.time() >= panel.get('next_spam_time', 0):
+                    try:
+                        bot.sendMessage(str(panel['channel_id']), str(panel['message']))
+                        print(f"[SPAM BOT] Gửi tin nhắn tới kênh {panel['channel_id']}", flush=True)
+                        
+                        with lock:
+                            for p in spam_panels:
+                                if p['id'] == panel['id']:
+                                    next_delay = get_new_random_delay(p)
+                                    p['next_spam_time'] = time.time() + next_delay
+                                    print(f"[SPAM BOT] Panel {p['id']} hẹn giờ tiếp theo sau {next_delay:.2f} giây.", flush=True)
+                                    break
+                            save_settings()
+                            
+                    except Exception as e:
+                        print(f"[SPAM BOT] LỖI: Không thể gửi tin nhắn. {e}", flush=True)
+                        with lock:
+                            for p in spam_panels:
+                                if p['id'] == panel['id']:
+                                    p['next_spam_time'] = time.time() + 60
+                                    break
             time.sleep(1)
         except Exception as e:
             print(f"LỖI NGOẠI LỆ trong vòng lặp spam: {e}", flush=True)
@@ -710,8 +745,9 @@ HTML_TEMPLATE = """
         button { background-color: #bb86fc; color: #121212; border: none; padding: 12px 24px; font-size: 1em; border-radius: 5px; cursor: pointer; transition: all 0.3s; font-weight: bold; }
         button:hover:not(:disabled) { background-color: #a050f0; transform: translateY(-2px); }
         button:disabled { background-color: #444; color: #888; cursor: not-allowed; }
-        .input-group { display: flex; } .input-group label { white-space: nowrap; padding: 10px; background-color: #333; border-radius: 5px 0 0 5px; }
-        .input-group input { width:100%; border: 1px solid #333; background-color: #222; color: #eee; padding: 10px; border-radius: 0 5px 5px 0; }
+        .input-group { display: flex; flex-direction: column; gap: 5px; } .input-group label { text-align: left; font-size: 0.9em; color: #aaa; }
+        .input-group-row { display: flex; } .input-group-row label { white-space: nowrap; padding: 10px; background-color: #333; border-radius: 5px 0 0 5px; }
+        .input-group-row input { width:100%; border: 1px solid #333; background-color: #222; color: #eee; padding: 10px; border-radius: 0 5px 5px 0; }
         .spam-controls { display: flex; flex-direction: column; gap: 20px; width: 100%; max-width: 840px; background-color: #1e1e1e; padding: 20px; border-radius: 10px; }
         #panel-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; width: 100%; }
         .spam-panel { background-color: #2a2a2a; padding: 20px; border-radius: 10px; display: flex; flex-direction: column; gap: 15px; border-left: 5px solid #333; }
@@ -726,6 +762,9 @@ HTML_TEMPLATE = """
         .save-success { background-color: #03dac6; color: #121212; }
         .save-error { background-color: #cf6679; color: #fff; }
         .channel-display {font-size:0.8em; color:#666; margin:10px 0;}
+        .delay-range-group { display: flex; align-items: center; gap: 5px; }
+        .delay-range-group input { text-align: center; }
+        .delay-range-group span { color: #888; }
     </style>
 </head>
 <body>
@@ -748,10 +787,9 @@ HTML_TEMPLATE = """
                 <input type="number" id="autoclick-button-index" value="0" min="0">
             </div>
             <div class="input-group">
-                <label for="autoclick-count">Số lần click</label>
+                <label for="autoclick-count">Số lần click (0 = ∞)</label>
                 <input type="number" id="autoclick-count" value="10" min="0">
             </div>
-            <p style="font-size:0.8em; color:#888; margin:0;">Nhập 0 để click vô hạn</p>
             <button id="toggleAutoclickBtn">Bật Auto Click</button>
         </div>
         <div class="panel" id="auto-kd-panel">
@@ -772,7 +810,7 @@ HTML_TEMPLATE = """
             <h2>Tiện ích: Vòng lặp Event</h2>
             <p style="font-size:0.9em; color:#aaa;">Tự động gửi 'kevent' theo chu kỳ. Chỉ hoạt động khi "Chế độ 1" đang chạy.</p>
             <div id="loop-status" class="status">Trạng thái: ĐÃ DỪNG</div>
-            <div class="input-group">
+            <div class="input-group-row">
                 <label for="delay-input">Delay (giây)</label>
                 <input type="number" id="delay-input" value="3600">
             </div>
@@ -780,7 +818,7 @@ HTML_TEMPLATE = """
         </div>
     </div>
     <div class="spam-controls">
-        <h2>Tiện ích: Spam Tin Nhắn</h2>
+        <h2>Tiện ích: Spam Tin Nhắn (Random theo phút)</h2>
         <div id="panel-container"></div>
         <button class="add-panel-btn" onclick="addPanel()">+ Thêm Bảng Spam</button>
     </div>
@@ -798,6 +836,11 @@ HTML_TEMPLATE = """
             if (body) options.body = JSON.stringify(body);
             try {
                 const response = await fetch(endpoint, options);
+                if (!response.ok) {
+                    const errorResult = await response.json();
+                    showSaveStatus(`Lỗi: ${errorResult.message || 'Unknown error'}`, false);
+                    return { error: errorResult.message || 'API call failed' };
+                }
                 const result = await response.json();
                 if (result.save_status !== undefined) {
                     showSaveStatus(result.save_status ? 'Đã lưu thành công' : 'Lỗi khi lưu', result.save_status);
@@ -880,34 +923,59 @@ HTML_TEMPLATE = """
             const div = document.createElement('div');
             div.className = `spam-panel ${panel.is_active ? 'active' : ''}`; 
             div.dataset.id = panel.id;
-            let countdown = panel.is_active ? panel.delay - (Date.now() / 1000 - panel.last_spam_time) : panel.delay;
+            
+            let countdown = 0;
+            if (panel.is_active && panel.next_spam_time) {
+                 countdown = panel.next_spam_time - (Date.now() / 1000);
+            }
             countdown = Math.max(0, Math.ceil(countdown));
+
             div.innerHTML = `
-                <textarea class="message-input" placeholder="Nội dung spam...">${panel.message}</textarea>
-                <input type="text" class="channel-input" placeholder="ID Kênh..." value="${panel.channel_id}">
-                <input type="number" class="delay-input" placeholder="Delay (giây)..." value="${panel.delay}">
+                <div class="input-group">
+                    <label>Nội dung spam</label>
+                    <textarea class="message-input">${panel.message}</textarea>
+                </div>
+                <div class="input-group">
+                    <label>ID Kênh</label>
+                    <input type="text" class="channel-input" value="${panel.channel_id}">
+                </div>
+                <div class="input-group">
+                    <label>Delay ngẫu nhiên (phút)</label>
+                    <div class="delay-range-group">
+                        <input type="number" class="delay-input-min-minutes" placeholder="Tối thiểu" value="${panel.delay_min_minutes || 4}">
+                        <span>-</span>
+                        <input type="number" class="delay-input-max-minutes" placeholder="Tối đa" value="${panel.delay_max_minutes || 5}">
+                    </div>
+                </div>
                 <div class="spam-panel-controls">
-                    <button class="toggle-btn">${panel.is_active ? 'TẮT' : 'BẬT'}</button>
+                    <button class="toggle-btn">${panel.is_active ? 'DỪNG' : 'CHẠY'}</button>
                     <button class="delete-btn">XÓA</button>
                 </div>
-                <div class="timer">Hẹn giờ: ${countdown}s</div>
+                <div class="timer">Tiếp theo trong: ${panel.is_active ? countdown + 's' : '...'}</div>
             `;
             
-            const getPanelData = () => ({ 
-                ...panel, 
-                message: div.querySelector('.message-input').value, 
-                channel_id: div.querySelector('.channel-input').value, 
-                delay: parseInt(div.querySelector('.delay-input').value, 10) || 60 
-            });
+            const getPanelData = () => {
+                let min = parseInt(div.querySelector('.delay-input-min-minutes').value, 10) || 4;
+                let max = parseInt(div.querySelector('.delay-input-max-minutes').value, 10) || 5;
+                if (min > max) [min, max] = [max, min];
+                return { 
+                    ...panel, 
+                    message: div.querySelector('.message-input').value, 
+                    channel_id: div.querySelector('.channel-input').value, 
+                    delay_min_minutes: min,
+                    delay_max_minutes: max
+                }
+            };
             
             div.querySelector('.toggle-btn').addEventListener('click', () => 
                 apiCall('/api/panel/update', 'POST', { ...getPanelData(), is_active: !panel.is_active }).then(fetchPanels)
             );
             div.querySelector('.delete-btn').addEventListener('click', () => { 
-                if (confirm('Xóa bảng này?')) 
+                if (confirm('Bạn có chắc muốn xóa bảng spam này?')) 
                     apiCall('/api/panel/delete', 'POST', { id: panel.id }).then(fetchPanels); 
             });
-            ['message-input', 'channel-input', 'delay-input'].forEach(className => {
+            
+            ['message-input', 'channel-input', 'delay-input-min-minutes', 'delay-input-max-minutes'].forEach(className => {
                 div.querySelector('.' + className).addEventListener('change', () => 
                     apiCall('/api/panel/update', 'POST', getPanelData())
                 );
@@ -918,7 +986,9 @@ HTML_TEMPLATE = """
         
         async function fetchPanels() {
             const focusedEl = document.activeElement;
-            if (focusedEl && focusedEl.closest('.spam-panel')) return;
+            if (focusedEl && (focusedEl.tagName === 'INPUT' || focusedEl.tagName === 'TEXTAREA')) {
+                return;
+            }
             const data = await apiCall('/api/panels', 'GET');
             const container = document.getElementById('panel-container'); 
             container.innerHTML = '';
@@ -932,7 +1002,8 @@ HTML_TEMPLATE = """
         
         document.addEventListener('DOMContentLoaded', () => {
             fetchStatus(); fetchPanels();
-            setInterval(fetchStatus, 2000); setInterval(fetchPanels, 2000);
+            setInterval(fetchStatus, 5000);
+            setInterval(fetchPanels, 1000);
         });
     </script>
 </body>
@@ -1076,9 +1147,10 @@ def add_panel():
             "id": panel_id_counter, 
             "message": "", 
             "channel_id": "", 
-            "delay": 60, 
+            "delay_min_minutes": 4, 
+            "delay_max_minutes": 5,
             "is_active": False, 
-            "last_spam_time": 0 
+            "next_spam_time": 0 
         }
         spam_panels.append(new_panel)
         panel_id_counter += 1
@@ -1091,8 +1163,12 @@ def update_panel():
     with lock:
         for panel in spam_panels:
             if panel['id'] == data['id']:
-                if data.get('is_active') and not panel.get('is_active'):
-                    data['last_spam_time'] = 0
+                is_activating = data.get('is_active') and not panel.get('is_active')
+                if is_activating:
+                    initial_delay = get_new_random_delay(data)
+                    data['next_spam_time'] = time.time() + initial_delay
+                    print(f"[SPAM CONTROL] Panel {panel['id']} đã kích hoạt, hẹn giờ sau {initial_delay:.2f} giây.", flush=True)
+                
                 panel.update(data)
                 break
         save_result = save_settings()
@@ -1110,19 +1186,12 @@ def delete_panel():
 # KHỞI CHẠY WEB SERVER
 # ===================================================================
 if __name__ == "__main__":
-    # Tải cài đặt từ JSON trước
     load_settings()
-    
-    # Khôi phục trạng thái các bot đã lưu
     restore_bot_states()
 
-    # Khởi động luồng spam
     spam_thread = threading.Thread(target=spam_loop, daemon=True)
     spam_thread.start()
     
-    # Chạy Web Server
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
-
-
