@@ -424,6 +424,8 @@ def run_auto_kvi_thread():
     with lock: auto_kvi_instance = bot
     
     last_action_time = time.time()
+    last_api_call_time = 0 
+    KVI_COOLDOWN_SECONDS = 5
     KVI_TIMEOUT_SECONDS = 7200
     
     def answer_question_with_gemini(bot_instance, message_data, question, options, answer_style='custom_id'):
@@ -443,7 +445,7 @@ Please respond with ONLY the number of the best option. For example: 3"""
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}]
             }
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key={GEMINI_API_KEY}"
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=={GEMINI_API_KEY}"
             
             print("[AUTO KVI LOG] Đang gửi yêu cầu trực tiếp đến Gemini API...", flush=True)
             response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload, timeout=20)
@@ -468,13 +470,10 @@ Please respond with ONLY the number of the best option. For example: 3"""
                 elif answer_style == 'button_label':
                     all_buttons = [button for row in message_data.get("components", []) for button in row.get("components", [])]
                     target_button = next((btn for btn in all_buttons if btn.get("label") == str(selected_option)), None)
-                    print(f"[AUTO KVI LOG] Đang tìm nút có label '{selected_option}'. Kết quả: {'Tìm thấy' if target_button else 'KHÔNG TÌM THẤY'}", flush=True)
                     if target_button:
                         custom_id_to_click = target_button.get("custom_id")
                 
-                print(f"[AUTO KVI LOG] Custom ID để click là: {custom_id_to_click}", flush=True)
                 if custom_id_to_click:
-                    print(f"[AUTO KVI LOG] Chờ 2 giây trước khi click để tránh lỗi timing...", flush=True)
                     time.sleep(2) 
                     send_interaction(bot_instance, message_data, custom_id_to_click, "AUTO KVI")
                 else:
@@ -489,7 +488,8 @@ Please respond with ONLY the number of the best option. For example: 3"""
 
     @bot.gateway.command
     def on_message(resp):
-        nonlocal last_action_time
+        nonlocal last_action_time, last_api_call_time
+
         with lock:
             if not is_auto_kvi_running: return
         
@@ -498,9 +498,15 @@ Please respond with ONLY the number of the best option. For example: 3"""
         m = resp.parsed.auto()
         if not (m.get("author", {}).get("id") == KARUTA_ID and m.get("channel_id") == KVI_CHANNEL_ID): return
 
+        current_time = time.time()
+        if current_time - last_api_call_time < KVI_COOLDOWN_SECONDS:
+            print(f"[AUTO KVI] COOLDOWN: Bỏ qua tin nhắn, còn {KVI_COOLDOWN_SECONDS - (current_time - last_api_call_time):.1f}s nữa.", flush=True)
+            return
+        
         last_action_time = time.time()
         
         embeds = m.get("embeds", [])
+        action_taken = False
         if embeds:
             embed = embeds[0]
             desc = embed.get("description", "")
@@ -516,26 +522,30 @@ Please respond with ONLY the number of the best option. For example: 3"""
                         options.append(cleaned_line)
 
                 if question and options:
+                    last_api_call_time = time.time()
+                    action_taken = True
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'button_label')).start()
-                    return
 
             fields = embed.get("fields", [])
-            if not question_match and desc.startswith('"') and fields:
+            if not action_taken and desc.startswith('"') and fields:
                 question = desc.strip('"')
                 options = [f.get("value", "") for f in fields if f.get("name", "").isdigit()]
                 if question and options:
+                    last_api_call_time = time.time()
+                    action_taken = True
                     threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options, 'custom_id')).start()
-                    return
-        
-        components = m.get("components", [])
-        all_buttons = [button for row in components for button in row.get("components", [])]
-        button_priority_order = ["Talk", "Actions", "Date", "Propose", "Continue"]
-        
-        for label in button_priority_order:
-            target_button = next((btn for btn in all_buttons if btn.get("label") == label), None)
-            if target_button and target_button.get("custom_id"):
-                threading.Thread(target=send_interaction, args=(bot, m, target_button.get("custom_id"), "AUTO KVI")).start()
-                return
+
+        if not action_taken:
+            components = m.get("components", [])
+            all_buttons = [button for row in components for button in row.get("components", [])]
+            button_priority_order = ["Talk", "Actions", "Date", "Propose", "Continue"]
+            
+            for label in button_priority_order:
+                target_button = next((btn for btn in all_buttons if btn.get("label") == label), None)
+                if target_button and target_button.get("custom_id"):
+                    last_api_call_time = time.time()
+                    threading.Thread(target=send_interaction, args=(bot, m, target_button.get("custom_id"), "AUTO KVI")).start()
+                    break
 
     def periodic_kvi_sender():
         nonlocal last_action_time
