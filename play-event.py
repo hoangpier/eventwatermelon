@@ -506,7 +506,10 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         embed = embeds[0]
         desc = embed.get("description", "")
         
-        # LOGIC THEO YÊU CẦU: Nếu có emoji 1 -> Dùng AI, nếu không -> Mặc định
+        # =========== START BLOCK SỬA LỖI ===========
+        components = m.get("components", [])
+        all_buttons = [button for row in components for button in row.get("components", []) if row.get("type") == 1]
+
         if '1️⃣' in desc:
             print("[AUTO KVI] INFO: Phát hiện câu hỏi có emoji 1️⃣. Dùng AI...", flush=True)
             question_patterns = [r'["“](.+?)["”]', r'"([^"]+)"']
@@ -531,18 +534,21 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
             
             if not question_found:
                  print("[AUTO KVI] WARN: Có emoji 1️⃣ nhưng không thể phân tích câu hỏi. Chuyển sang hành động mặc định.", flush=True)
-                 threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
-        else:
-            if "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
-                if time.time() - last_session_end_time > 60:
-                    last_session_end_time = time.time()
-                    with lock:
-                        next_kvi_allowed_time = time.time() + 1800
-                        print(f"[AUTO KVI] INFO: Phiên KVI kết thúc. KVI tiếp theo được phép sau {time.strftime('%H:%M:%S', time.localtime(next_kvi_allowed_time))}", flush=True)
-                        save_settings()
-            else:
-                print("[AUTO KVI] INFO: Không có emoji 1️⃣. Thực hiện hành động mặc định.", flush=True)
-                threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
+                 if all_buttons: # Thêm kiểm tra nút ở đây
+                    threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
+
+        elif "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
+            if time.time() - last_session_end_time > 60:
+                last_session_end_time = time.time()
+                with lock:
+                    next_kvi_allowed_time = time.time() + 1800
+                    print(f"[AUTO KVI] INFO: Phiên KVI kết thúc. KVI tiếp theo được phép sau {time.strftime('%H:%M:%S', time.localtime(next_kvi_allowed_time))}", flush=True)
+                    save_settings()
+        
+        elif all_buttons: # Đây là điều kiện quan trọng được thêm vào
+            print("[AUTO KVI] INFO: Không có emoji 1️⃣, phát hiện có nút bấm. Thực hiện hành động mặc định.", flush=True)
+            threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
+        # =========== END BLOCK SỬA LỖI ===========
 
     def periodic_kvi_sender():
         nonlocal last_action_time, last_kvi_send_time
