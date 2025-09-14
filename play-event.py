@@ -406,8 +406,9 @@ def run_auto_kvi_thread():
     last_action_time = time.time()
     last_api_call_time = 0
     last_kvi_send_time = 0
+    last_session_end_time = 0 # BIẾN MỚI: Dùng để chống spam khi kết thúc phiên
     KVI_COOLDOWN_SECONDS = 3
-    KVI_TIMEOUT_SECONDS = 7500
+    KVI_TIMEOUT_SECONDS = 3605
 
     def answer_question_with_gemini(bot_instance, message_data, question, options):
         nonlocal last_api_call_time
@@ -480,28 +481,37 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         components = message_data.get("components", [])
         all_buttons = [button for row in components for button in row.get("components", [])]
         
+        # CHỈNH SỬA #1: Chỉ ưu tiên nút "Talk"
         button_priority = ["Talk"]
         
         for label in button_priority:
+            # CHỈNH SỬA #2: Xóa kiểm tra 'disabled' để bỏ qua lỗi giao diện
+            # Giờ bot sẽ cố bấm nút "Talk" bất kể trạng thái Discord báo về
             target_index = next((i for i, btn in enumerate(all_buttons) if btn.get("label") == label), None)
+            
             if target_index is not None:
-                print(f"[AUTO KVI] INFO: Click button ưu tiên '{label}'", flush=True)
+                print(f"[AUTO KVI] INFO: Tìm thấy nút ưu tiên '{label}'. Đang click...", flush=True)
                 time.sleep(random.uniform(1.0, 2.0))
                 if click_button_by_index(bot_instance, message_data, target_index, "AUTO KVI"):
                     last_api_call_time = time.time()
                 return
         
-        first_available_index = next((i for i, btn in enumerate(all_buttons) if not btn.get("disabled")), None)
-        if first_available_index is not None:
-            print(f"[AUTO KVI] INFO: Click button đầu tiên khả dụng", flush=True)
-            time.sleep(random.uniform(1.0, 2.0))
-            if click_button_by_index(bot_instance, message_data, first_available_index, "AUTO KVI"):
-                last_api_call_time = time.time()
-            return
+        # CHỈNH SỬA #3: Đã xóa logic dự phòng để tránh bấm nhầm các nút khác
+
+    # HÀM MỚI: Dùng để xử lý việc chờ 30 phút một cách an toàn
+    def handle_session_end(bot_instance):
+        """Hàm này sẽ chờ 30 phút trong một luồng riêng và gửi kvi."""
+        print("[AUTO KVI] THREAD: Bắt đầu chờ 30 phút...", flush=True)
+        time.sleep(1800)
+        try:
+            bot_instance.sendMessage(KVI_CHANNEL_ID, "kvi")
+            print("[AUTO KVI] INFO: Đã gửi lệnh kvi mới sau 30 phút chờ.", flush=True)
+        except Exception as e:
+            print(f"[AUTO KVI] LỖI: Không thể gửi kvi sau khi chờ: {e}", flush=True)
 
     @bot.gateway.command
     def on_message(resp):
-        nonlocal last_action_time, last_api_call_time
+        nonlocal last_action_time, last_api_call_time, last_session_end_time
         with lock:
             if not is_auto_kvi_running:
                 bot.gateway.close()
@@ -551,14 +561,12 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
                     break
         
         if not question_found:
+            # SỬA LỖI #4: Logic xử lý kết thúc phiên đã được viết lại hoàn toàn
             if "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
-                print("[AUTO KVI] INFO: Phiên KVI kết thúc, chuẩn bị gửi kvi mới sau 30 phút.", flush=True)
-                time.sleep(1800) 
-                try:
-                    bot.sendMessage(KVI_CHANNEL_ID, "kvi")
-                    print("[AUTO KVI] INFO: Đã gửi lệnh kvi mới", flush=True)
-                except Exception as e:
-                    print(f"[AUTO KVI] LỖI: Không thể gửi kvi: {e}", flush=True)
+                if time.time() - last_session_end_time > 60: # Chống spam, chỉ kích hoạt 1 lần mỗi phút
+                    last_session_end_time = time.time()
+                    print("[AUTO KVI] INFO: Phiên KVI kết thúc. Lên lịch gửi kvi mới sau 30 phút.", flush=True)
+                    threading.Thread(target=handle_session_end, args=(bot,), daemon=True).start()
             else:
                 threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
 
@@ -1126,5 +1134,3 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
-
-
