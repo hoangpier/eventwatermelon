@@ -55,7 +55,7 @@ is_hourly_loop_enabled = False
 loop_delay_seconds = 3600
 spam_panels = []
 panel_id_counter = 0
-next_kvi_allowed_time = 0 # SỬA LỖI 30P: Biến lưu thời gian được phép gửi KVI
+next_kvi_allowed_time = 0 # Biến lưu thời gian được phép gửi KVI
 
 # Các biến runtime khác
 event_bot_thread, event_bot_instance = None, None
@@ -78,26 +78,17 @@ def save_settings():
             return False
 
         settings_to_save = {
-            # Trạng thái chạy
             'is_event_bot_running': is_event_bot_running,
             'is_auto_kd_running': is_auto_kd_running,
             'is_auto_kvi_running': is_auto_kvi_running,
             'is_autoclick_running': is_autoclick_running,
-            
-            # Cài đặt loop
             'is_hourly_loop_enabled': is_hourly_loop_enabled,
             'loop_delay_seconds': loop_delay_seconds,
-            
-            # Spam panels
             'spam_panels': spam_panels,
             'panel_id_counter': panel_id_counter,
-            
-            # Autoclick settings
             'autoclick_button_index': autoclick_button_index,
             'autoclick_count': autoclick_count,
             'autoclick_clicks_done': autoclick_clicks_done,
-
-            # SỬA LỖI 30P: Lưu lại thời gian chờ KVI
             'next_kvi_allowed_time': next_kvi_allowed_time
         }
         
@@ -139,29 +130,19 @@ def load_settings():
             if req.status_code == 200:
                 settings = req.json()
                 if settings and isinstance(settings, dict):
-                    # Load trạng thái chạy
                     is_event_bot_running = settings.get('is_event_bot_running', False)
                     is_auto_kd_running = settings.get('is_auto_kd_running', False)
                     is_auto_kvi_running = settings.get('is_auto_kvi_running', False)
                     is_autoclick_running = settings.get('is_autoclick_running', False)
-                    
-                    # Load cài đặt loop
                     is_hourly_loop_enabled = settings.get('is_hourly_loop_enabled', False)
                     loop_delay_seconds = settings.get('loop_delay_seconds', 3600)
-                    
-                    # Load spam panels
                     spam_panels = settings.get('spam_panels', [])
                     panel_id_counter = settings.get('panel_id_counter', 0)
-                    
-                    # Load autoclick settings
                     autoclick_button_index = settings.get('autoclick_button_index', 0)
                     autoclick_count = settings.get('autoclick_count', 0)
                     autoclick_clicks_done = settings.get('autoclick_clicks_done', 0)
-
-                    # SỬA LỖI 30P: Tải thời gian chờ KVI
                     next_kvi_allowed_time = settings.get('next_kvi_allowed_time', 0)
                     
-                    # Đảm bảo panel_id_counter đúng
                     if spam_panels:
                         max_id = max(p.get('id', -1) for p in spam_panels)
                         panel_id_counter = max(panel_id_counter, max_id + 1)
@@ -503,7 +484,10 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
 
     @bot.gateway.command
     def on_message(resp):
-        nonlocal last_action_time, last_api_call_time, last_session_end_time, next_kvi_allowed_time
+        # SỬA LỖI CÚ PHÁP: Dùng 'global' cho biến toàn cục
+        nonlocal last_action_time, last_api_call_time, last_session_end_time
+        global next_kvi_allowed_time
+        
         with lock:
             if not is_auto_kvi_running:
                 bot.gateway.close()
@@ -539,7 +523,8 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
                     if all(label.isdigit() for label in button_labels):
                         lines = desc.split('\n')
                         for line in lines:
-                            match = re.search(r'^\s*(?:\d{1,2}[\.\)]|:keycap_(\d{1,2}):|(\d{1,2})️⃣)\s*(.+)', line)
+                            # Cải thiện regex để bắt cả emoji và số thường
+                            match = re.search(r'^\s*(?:\d{1,2}[\.\)]|(\d{1,2})️⃣)\s*(.+)', line)
                             if match:
                                 option_text = match.groups()[-1].strip()
                                 if option_text:
@@ -555,10 +540,9 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         
         if not question_found:
             if "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
-                if time.time() - last_session_end_time > 60:
+                if time.time() - last_session_end_time > 60: # Chống spam
                     last_session_end_time = time.time()
                     with lock:
-                        # SỬA LỖI 30P: Đặt thời gian chờ và lưu lại
                         next_kvi_allowed_time = time.time() + 1800
                         print(f"[AUTO KVI] INFO: Phiên KVI kết thúc. KVI tiếp theo được phép sau {time.strftime('%H:%M:%S', time.localtime(next_kvi_allowed_time))}", flush=True)
                         save_settings()
@@ -566,11 +550,13 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
                 threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
 
     def periodic_kvi_sender():
-        nonlocal last_action_time, last_kvi_send_time, next_kvi_allowed_time
+        # SỬA LỖI CÚ PHÁP: Dùng 'global' cho biến toàn cục
+        nonlocal last_action_time, last_kvi_send_time
+        global next_kvi_allowed_time
+        
         time.sleep(10)
 
         with lock:
-            # SỬA LỖI 30P: Kiểm tra thời gian cho phép trước khi gửi kvi khởi tạo
             if time.time() < next_kvi_allowed_time:
                 wait_time = next_kvi_allowed_time - time.time()
                 print(f"[AUTO KVI] INFO: Đang trong thời gian chờ. Sẽ không gửi kvi khởi tạo. Chờ thêm {wait_time:.0f} giây.", flush=True)
