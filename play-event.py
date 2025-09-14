@@ -407,7 +407,7 @@ def run_auto_kvi_thread():
     last_api_call_time = 0
     last_kvi_send_time = 0
     KVI_COOLDOWN_SECONDS = 3
-    KVI_TIMEOUT_SECONDS = 3605
+    KVI_TIMEOUT_SECONDS = 7500
 
     def answer_question_with_gemini(bot_instance, message_data, question, options):
         nonlocal last_api_call_time
@@ -483,7 +483,7 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         button_priority = ["Talk"]
         
         for label in button_priority:
-            target_index = next((i for i, btn in enumerate(all_buttons) if btn.get("label") == label and not btn.get("disabled")), None)
+            target_index = next((i for i, btn in enumerate(all_buttons) if btn.get("label") == label), None)
             if target_index is not None:
                 print(f"[AUTO KVI] INFO: Click button ưu tiên '{label}'", flush=True)
                 time.sleep(random.uniform(1.0, 2.0))
@@ -1126,4 +1126,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
