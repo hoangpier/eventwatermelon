@@ -465,44 +465,29 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
             print(f"[AUTO KVI] LỖI NGOẠI LỆ: {e}. Chọn đáp án đầu tiên.", flush=True)
             click_button_by_index(bot_instance, message_data, 0, "AUTO KVI")
 
-    def smart_button_click(bot_instance, message_data):
-        # THAY ĐỔI THEO YÊU CẦU: Luôn bấm nút đầu tiên
+    def click_talk_button(bot_instance, message_data):
+        """Specifically click the Talk button"""
         nonlocal last_api_call_time
         
-        # Debug: Print the entire message structure
-        print(f"[AUTO KVI DEBUG] Full message data: {json.dumps(message_data, indent=2)}", flush=True)
-        
         components = message_data.get("components", [])
-        print(f"[AUTO KVI DEBUG] Components found: {len(components)} rows", flush=True)
+        all_buttons = [button for row in components for button in row.get("components", [])]
         
-        all_buttons = []
-        for i, row in enumerate(components):
-            row_components = row.get("components", [])
-            print(f"[AUTO KVI DEBUG] Row {i}: {len(row_components)} components", flush=True)
-            for j, comp in enumerate(row_components):
-                print(f"[AUTO KVI DEBUG] Row {i}, Button {j}: Label='{comp.get('label', 'No label')}', Type={comp.get('type')}", flush=True)
-            all_buttons.extend(row_components)
+        # Find Talk button index
+        talk_button_index = None
+        for i, button in enumerate(all_buttons):
+            if button.get("label", "").lower() == "talk":
+                talk_button_index = i
+                break
         
-        print(f"[AUTO KVI DEBUG] Total buttons found: {len(all_buttons)}", flush=True)
-        
-        if all_buttons:
-            target_index = 0 # Luôn là vị trí đầu tiên
-            button_label = all_buttons[target_index].get("label", "Không rõ")
-            print(f"[AUTO KVI DEBUG] Attempting to click button at index {target_index} with label: '{button_label}'", flush=True)
-            
-            # Check if this is actually a button component
-            if all_buttons[target_index].get("type") != 2: # Type 2 = Button
-                print(f"[AUTO KVI ERROR] Component at index {target_index} is not a button! Type: {all_buttons[target_index].get('type')}", flush=True)
-                return
-            
+        if talk_button_index is not None:
+            print(f"[AUTO KVI] INFO: Clicking Talk button at index {talk_button_index}", flush=True)
             time.sleep(random.uniform(1.0, 2.0))
-            if click_button_by_index(bot_instance, message_data, target_index, "AUTO KVI"):
+            if click_button_by_index(bot_instance, message_data, talk_button_index, "AUTO KVI"):
                 last_api_call_time = time.time()
-                print(f"[AUTO KVI DEBUG] Successfully clicked button '{button_label}'", flush=True)
             else:
-                print(f"[AUTO KVI DEBUG] Failed to click button '{button_label}'", flush=True)
+                print("[AUTO KVI] ERROR: Failed to click Talk button", flush=True)
         else:
-            print("[AUTO KVI WARN] Không tìm thấy nút nào để bấm.", flush=True)
+            print("[AUTO KVI] ERROR: Talk button not found!", flush=True)
 
     @bot.gateway.command
     def on_message(resp):
@@ -532,9 +517,37 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         embed = embeds[0]
         desc = embed.get("description", "")
         
-        print(f"[AUTO KVI DEBUG] Embed description: '{desc[:200]}...'", flush=True)
+        # Check if this is a KVI message by looking for "Visit Character" in embed
+        embed_title = embed.get("title", "")
+        if "Visit Character" not in embed_title:
+            print("[AUTO KVI DEBUG] Not a Visit Character message, ignoring", flush=True)
+            return
         
-        # LOGIC THEO YÊU CẦU: Nếu có emoji 1 -> Dùng AI, nếu không -> Mặc định
+        # Get all buttons to check if Talk button exists
+        components = m.get("components", [])
+        all_buttons = [button for row in components for button in row.get("components", [])]
+        button_labels = [btn.get("label", "").lower() for btn in all_buttons]
+        
+        print(f"[AUTO KVI DEBUG] Available buttons: {[btn.get('label', 'No label') for btn in all_buttons]}", flush=True)
+        
+        # Check if Talk button exists
+        has_talk_button = "talk" in button_labels
+        
+        if not has_talk_button:
+            # Session has ended - Talk button is missing
+            print("[AUTO KVI DEBUG] Talk button missing - session ended", flush=True)
+            if time.time() - last_session_end_time > 60:
+                last_session_end_time = time.time()
+                with lock:
+                    next_kvi_allowed_time = time.time() + 1800 # 30 minutes cooldown
+                    print(f"[AUTO KVI] INFO: Phiên KVI kết thúc (không còn nút Talk). KVI tiếp theo được phép sau {time.strftime('%H:%M:%S', time.localtime(next_kvi_allowed_time))}", flush=True)
+                    save_settings()
+            return
+        
+        # Talk button exists - continue with interaction logic
+        print("[AUTO KVI DEBUG] Talk button found - continuing interaction", flush=True)
+        
+        # LOGIC THEO YÊU CẦU: Nếu có emoji 1 -> Dùng AI, nếu không -> Click Talk
         if '1️⃣' in desc:
             print("[AUTO KVI DEBUG] Found 1️⃣ emoji - using AI logic", flush=True)
             question_patterns = [r'["“](.+?)["”]', r'"([^"]+)"']
@@ -558,21 +571,11 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
                         break
             
             if not question_found:
-                 print("[AUTO KVI] WARN: Có emoji 1️⃣ nhưng không thể phân tích câu hỏi. Chuyển sang hành động mặc định.", flush=True)
-                 threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
+                 print("[AUTO KVI WARN] Có emoji 1️⃣ nhưng không thể phân tích câu hỏi. Click nút Talk.", flush=True)
+                 threading.Thread(target=click_talk_button, args=(bot, m), daemon=True).start()
         else:
-            print("[AUTO KVI DEBUG] No 1️⃣ emoji found", flush=True)
-            if "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
-                print("[AUTO KVI DEBUG] Found session end indicators", flush=True)
-                if time.time() - last_session_end_time > 60:
-                    last_session_end_time = time.time()
-                    with lock:
-                        next_kvi_allowed_time = time.time() + 1800
-                        print(f"[AUTO KVI] INFO: Phiên KVI kết thúc. KVI tiếp theo được phép sau {time.strftime('%H:%M:%S', time.localtime(next_kvi_allowed_time))}", flush=True)
-                        save_settings()
-            else:
-                print("[AUTO KVI DEBUG] No session end indicators - executing default action", flush=True)
-                threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
+            print("[AUTO KVI DEBUG] No 1️⃣ emoji found - clicking Talk button", flush=True)
+            threading.Thread(target=click_talk_button, args=(bot, m), daemon=True).start()
 
     def periodic_kvi_sender():
         nonlocal last_action_time, last_kvi_send_time
