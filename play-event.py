@@ -55,7 +55,7 @@ is_hourly_loop_enabled = False
 loop_delay_seconds = 3600
 spam_panels = []
 panel_id_counter = 0
-next_kvi_allowed_time = 0 # Biến lưu thời gian được phép gửi KVI
+next_kvi_allowed_time = 0 
 
 # Các biến runtime khác
 event_bot_thread, event_bot_instance = None, None
@@ -466,21 +466,20 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
             click_button_by_index(bot_instance, message_data, 0, "AUTO KVI")
 
     def smart_button_click(bot_instance, message_data):
+        # THAY ĐỔI THEO YÊU CẦU: Luôn bấm nút đầu tiên
         nonlocal last_api_call_time
         components = message_data.get("components", [])
         all_buttons = [button for row in components for button in row.get("components", [])]
         
-        button_priority = ["Talk"]
-        
-        for label in button_priority:
-            target_index = next((i for i, btn in enumerate(all_buttons) if btn.get("label") == label), None)
-            
-            if target_index is not None:
-                print(f"[AUTO KVI] INFO: Tìm thấy nút ưu tiên '{label}'. Đang click...", flush=True)
-                time.sleep(random.uniform(1.0, 2.0))
-                if click_button_by_index(bot_instance, message_data, target_index, "AUTO KVI"):
-                    last_api_call_time = time.time()
-                return
+        if all_buttons: # Kiểm tra xem có nút nào không
+            target_index = 0 # Luôn là vị trí đầu tiên
+            button_label = all_buttons[target_index].get("label", "Không rõ")
+            print(f"[AUTO KVI] INFO: Nhấn vào nút ở vị trí đầu tiên (Index 0, Label: {button_label}).", flush=True)
+            time.sleep(random.uniform(1.0, 2.0))
+            if click_button_by_index(bot_instance, message_data, target_index, "AUTO KVI"):
+                last_api_call_time = time.time()
+        else:
+            print("[AUTO KVI] WARN: Không tìm thấy nút nào để bấm.", flush=True)
 
     @bot.gateway.command
     def on_message(resp):
@@ -507,9 +506,7 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         embed = embeds[0]
         desc = embed.get("description", "")
         
-        # LOGIC MỚI THEO YÊU CẦU CỦA BẠN
-        
-        # TRƯỜNG HỢP 1: NẾU CÓ EMOJI 1️⃣ -> DÙNG AI
+        # LOGIC THEO YÊU CẦU: Nếu có emoji 1 -> Dùng AI, nếu không -> Mặc định
         if '1️⃣' in desc:
             print("[AUTO KVI] INFO: Phát hiện câu hỏi có emoji 1️⃣. Dùng AI...", flush=True)
             question_patterns = [r'["“](.+?)["”]', r'"([^"]+)"']
@@ -533,10 +530,8 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
                         break
             
             if not question_found:
-                 print("[AUTO KVI] WARN: Có emoji 1️⃣ nhưng không thể phân tích câu hỏi. Chuyển sang bấm Talk.", flush=True)
+                 print("[AUTO KVI] WARN: Có emoji 1️⃣ nhưng không thể phân tích câu hỏi. Chuyển sang hành động mặc định.", flush=True)
                  threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
-
-        # TRƯỜNG HỢP 2: NẾU KHÔNG CÓ EMOJI 1️⃣ -> CHẠY LOGIC MẶC ĐỊNH
         else:
             if "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
                 if time.time() - last_session_end_time > 60:
@@ -546,7 +541,7 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
                         print(f"[AUTO KVI] INFO: Phiên KVI kết thúc. KVI tiếp theo được phép sau {time.strftime('%H:%M:%S', time.localtime(next_kvi_allowed_time))}", flush=True)
                         save_settings()
             else:
-                print("[AUTO KVI] INFO: Không có emoji 1️⃣. Thực hiện hành động mặc định (Click Talk).", flush=True)
+                print("[AUTO KVI] INFO: Không có emoji 1️⃣. Thực hiện hành động mặc định.", flush=True)
                 threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
 
     def periodic_kvi_sender():
@@ -1121,4 +1116,3 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
-
