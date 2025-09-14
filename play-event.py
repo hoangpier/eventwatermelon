@@ -55,6 +55,7 @@ is_hourly_loop_enabled = False
 loop_delay_seconds = 3600
 spam_panels = []
 panel_id_counter = 0
+next_kvi_allowed_time = 0 # SỬA LỖI 30P: Biến lưu thời gian được phép gửi KVI
 
 # Các biến runtime khác
 event_bot_thread, event_bot_instance = None, None
@@ -94,7 +95,10 @@ def save_settings():
             # Autoclick settings
             'autoclick_button_index': autoclick_button_index,
             'autoclick_count': autoclick_count,
-            'autoclick_clicks_done': autoclick_clicks_done
+            'autoclick_clicks_done': autoclick_clicks_done,
+
+            # SỬA LỖI 30P: Lưu lại thời gian chờ KVI
+            'next_kvi_allowed_time': next_kvi_allowed_time
         }
         
         headers = {
@@ -120,6 +124,7 @@ def load_settings():
     global is_event_bot_running, is_auto_kd_running, is_autoclick_running, is_auto_kvi_running
     global is_hourly_loop_enabled, loop_delay_seconds, spam_panels, panel_id_counter
     global autoclick_button_index, autoclick_count, autoclick_clicks_done
+    global next_kvi_allowed_time
     
     with lock:
         if not JSONBIN_API_KEY or not JSONBIN_BIN_ID:
@@ -152,6 +157,9 @@ def load_settings():
                     autoclick_button_index = settings.get('autoclick_button_index', 0)
                     autoclick_count = settings.get('autoclick_count', 0)
                     autoclick_clicks_done = settings.get('autoclick_clicks_done', 0)
+
+                    # SỬA LỖI 30P: Tải thời gian chờ KVI
+                    next_kvi_allowed_time = settings.get('next_kvi_allowed_time', 0)
                     
                     # Đảm bảo panel_id_counter đúng
                     if spam_panels:
@@ -389,7 +397,7 @@ def run_auto_kd_thread():
 # CHỨC NĂNG AUTO KVI
 # ===================================================================
 def run_auto_kvi_thread():
-    global is_auto_kvi_running, auto_kvi_instance
+    global is_auto_kvi_running, auto_kvi_instance, next_kvi_allowed_time
     
     if not KVI_CHANNEL_ID:
         print("[AUTO KVI] LỖI: Chưa cấu hình KVI_CHANNEL_ID.", flush=True)
@@ -406,7 +414,7 @@ def run_auto_kvi_thread():
     last_action_time = time.time()
     last_api_call_time = 0
     last_kvi_send_time = 0
-    last_session_end_time = 0 # BIẾN MỚI: Dùng để chống spam khi kết thúc phiên
+    last_session_end_time = 0
     KVI_COOLDOWN_SECONDS = 3
     KVI_TIMEOUT_SECONDS = 3605
 
@@ -481,12 +489,9 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         components = message_data.get("components", [])
         all_buttons = [button for row in components for button in row.get("components", [])]
         
-        # CHỈNH SỬA #1: Chỉ ưu tiên nút "Talk"
         button_priority = ["Talk"]
         
         for label in button_priority:
-            # CHỈNH SỬA #2: Xóa kiểm tra 'disabled' để bỏ qua lỗi giao diện
-            # Giờ bot sẽ cố bấm nút "Talk" bất kể trạng thái Discord báo về
             target_index = next((i for i, btn in enumerate(all_buttons) if btn.get("label") == label), None)
             
             if target_index is not None:
@@ -495,23 +500,10 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
                 if click_button_by_index(bot_instance, message_data, target_index, "AUTO KVI"):
                     last_api_call_time = time.time()
                 return
-        
-        # CHỈNH SỬA #3: Đã xóa logic dự phòng để tránh bấm nhầm các nút khác
-
-    # HÀM MỚI: Dùng để xử lý việc chờ 30 phút một cách an toàn
-    def handle_session_end(bot_instance):
-        """Hàm này sẽ chờ 30 phút trong một luồng riêng và gửi kvi."""
-        print("[AUTO KVI] THREAD: Bắt đầu chờ 30 phút...", flush=True)
-        time.sleep(1800)
-        try:
-            bot_instance.sendMessage(KVI_CHANNEL_ID, "kvi")
-            print("[AUTO KVI] INFO: Đã gửi lệnh kvi mới sau 30 phút chờ.", flush=True)
-        except Exception as e:
-            print(f"[AUTO KVI] LỖI: Không thể gửi kvi sau khi chờ: {e}", flush=True)
 
     @bot.gateway.command
     def on_message(resp):
-        nonlocal last_action_time, last_api_call_time, last_session_end_time
+        nonlocal last_action_time, last_api_call_time, last_session_end_time, next_kvi_allowed_time
         with lock:
             if not is_auto_kvi_running:
                 bot.gateway.close()
@@ -532,54 +524,64 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         embed = embeds[0]
         desc = embed.get("description", "")
         
-        question_patterns = [r'["“](.+?)["”]', r'"([^"]+)"']
         question_found = False
-        for pattern in question_patterns:
-            question_match = re.search(pattern, desc, re.DOTALL)
-            if question_match:
-                question = question_match.group(1).strip()
-                options = []
-                
-                button_labels = [btn.get("label", "").strip() for row in m.get("components", []) for btn in row.get("components", []) if btn.get("label")]
-                
-                if all(label.isdigit() for label in button_labels):
-                    print("[AUTO KVI] INFO: Phát hiện tùy chọn trong mô tả embed. Đang phân tích...", flush=True)
-                    lines = desc.split('\n')
-                    for line in lines:
-                        match = re.search(r'^\s*(?:\d{1,2}[\.\)]|\d{1,2}️⃣)\s*(.+)', line)
-                        if match:
-                            option_text = match.group(1).strip()
-                            if option_text:
-                                options.append(option_text)
-                else:
-                    options = button_labels
+        
+        # THAY ĐỔI THEO YÊU CẦU: Chỉ coi là câu hỏi nếu có emoji 1️⃣
+        if '1️⃣' in desc:
+            question_patterns = [r'["“](.+?)["”]', r'"([^"]+)"']
+            for pattern in question_patterns:
+                question_match = re.search(pattern, desc, re.DOTALL)
+                if question_match:
+                    question = question_match.group(1).strip()
+                    options = []
+                    button_labels = [btn.get("label", "").strip() for row in m.get("components", []) for btn in row.get("components", []) if btn.get("label")]
+                    
+                    if all(label.isdigit() for label in button_labels):
+                        lines = desc.split('\n')
+                        for line in lines:
+                            match = re.search(r'^\s*(?:\d{1,2}[\.\)]|:keycap_(\d{1,2}):|(\d{1,2})️⃣)\s*(.+)', line)
+                            if match:
+                                option_text = match.groups()[-1].strip()
+                                if option_text:
+                                    options.append(option_text)
+                    else:
+                        options = button_labels
 
-                if question and len(options) >= 2:
-                    print(f"[AUTO KVI] INFO: Tìm thấy câu hỏi với {len(options)} lựa chọn.", flush=True)
-                    question_found = True
-                    threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options), daemon=True).start()
-                    break
+                    if question and len(options) >= 2:
+                        print(f"[AUTO KVI] INFO: Tìm thấy câu hỏi với {len(options)} lựa chọn.", flush=True)
+                        question_found = True
+                        threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options), daemon=True).start()
+                        break
         
         if not question_found:
-            # SỬA LỖI #4: Logic xử lý kết thúc phiên đã được viết lại hoàn toàn
             if "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
-                if time.time() - last_session_end_time > 60: # Chống spam, chỉ kích hoạt 1 lần mỗi phút
+                if time.time() - last_session_end_time > 60:
                     last_session_end_time = time.time()
-                    print("[AUTO KVI] INFO: Phiên KVI kết thúc. Lên lịch gửi kvi mới sau 30 phút.", flush=True)
-                    threading.Thread(target=handle_session_end, args=(bot,), daemon=True).start()
+                    with lock:
+                        # SỬA LỖI 30P: Đặt thời gian chờ và lưu lại
+                        next_kvi_allowed_time = time.time() + 1800
+                        print(f"[AUTO KVI] INFO: Phiên KVI kết thúc. KVI tiếp theo được phép sau {time.strftime('%H:%M:%S', time.localtime(next_kvi_allowed_time))}", flush=True)
+                        save_settings()
             else:
                 threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
 
     def periodic_kvi_sender():
-        nonlocal last_action_time, last_kvi_send_time
+        nonlocal last_action_time, last_kvi_send_time, next_kvi_allowed_time
         time.sleep(10)
-        try:
-            bot.sendMessage(KVI_CHANNEL_ID, "kvi")
-            last_kvi_send_time = time.time()
-            last_action_time = time.time()
-            print("[AUTO KVI] INFO: Gửi lệnh kvi khởi tạo", flush=True)
-        except Exception as e:
-            print(f"[AUTO KVI] LỖI: Không thể gửi kvi khởi tạo: {e}", flush=True)
+
+        with lock:
+            # SỬA LỖI 30P: Kiểm tra thời gian cho phép trước khi gửi kvi khởi tạo
+            if time.time() < next_kvi_allowed_time:
+                wait_time = next_kvi_allowed_time - time.time()
+                print(f"[AUTO KVI] INFO: Đang trong thời gian chờ. Sẽ không gửi kvi khởi tạo. Chờ thêm {wait_time:.0f} giây.", flush=True)
+            else:
+                try:
+                    bot.sendMessage(KVI_CHANNEL_ID, "kvi")
+                    last_kvi_send_time = time.time()
+                    last_action_time = time.time()
+                    print("[AUTO KVI] INFO: Gửi lệnh kvi khởi tạo", flush=True)
+                except Exception as e:
+                    print(f"[AUTO KVI] LỖI: Không thể gửi kvi khởi tạo: {e}", flush=True)
         
         while True:
             with lock:
