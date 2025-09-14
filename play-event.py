@@ -484,7 +484,6 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
 
     @bot.gateway.command
     def on_message(resp):
-        # SỬA LỖI CÚ PHÁP: Dùng 'global' cho biến toàn cục
         nonlocal last_action_time, last_api_call_time, last_session_end_time
         global next_kvi_allowed_time
         
@@ -508,49 +507,49 @@ Respond with ONLY the number (1, 2, 3, etc.) of the BEST option to increase affe
         embed = embeds[0]
         desc = embed.get("description", "")
         
-        question_found = False
+        # LOGIC MỚI THEO YÊU CẦU CỦA BẠN
         
-        # THAY ĐỔI THEO YÊU CẦU: Chỉ coi là câu hỏi nếu có emoji 1️⃣
+        # TRƯỜNG HỢP 1: NẾU CÓ EMOJI 1️⃣ -> DÙNG AI
         if '1️⃣' in desc:
+            print("[AUTO KVI] INFO: Phát hiện câu hỏi có emoji 1️⃣. Dùng AI...", flush=True)
             question_patterns = [r'["“](.+?)["”]', r'"([^"]+)"']
+            question_found = False
             for pattern in question_patterns:
                 question_match = re.search(pattern, desc, re.DOTALL)
                 if question_match:
                     question = question_match.group(1).strip()
                     options = []
-                    button_labels = [btn.get("label", "").strip() for row in m.get("components", []) for btn in row.get("components", []) if btn.get("label")]
+                    lines = desc.split('\n')
+                    for line in lines:
+                        match = re.search(r'^\s*(?:\d{1,2}[\.\)]|:keycap_(\d{1,2}):|(\d{1,2})️⃣)\s*(.+)', line)
+                        if match:
+                            option_text = match.groups()[-1].strip()
+                            if option_text:
+                                options.append(option_text)
                     
-                    if all(label.isdigit() for label in button_labels):
-                        lines = desc.split('\n')
-                        for line in lines:
-                            # Cải thiện regex để bắt cả emoji và số thường
-                            match = re.search(r'^\s*(?:\d{1,2}[\.\)]|(\d{1,2})️⃣)\s*(.+)', line)
-                            if match:
-                                option_text = match.groups()[-1].strip()
-                                if option_text:
-                                    options.append(option_text)
-                    else:
-                        options = button_labels
-
                     if question and len(options) >= 2:
-                        print(f"[AUTO KVI] INFO: Tìm thấy câu hỏi với {len(options)} lựa chọn.", flush=True)
                         question_found = True
                         threading.Thread(target=answer_question_with_gemini, args=(bot, m, question, options), daemon=True).start()
                         break
-        
-        if not question_found:
+            
+            if not question_found:
+                 print("[AUTO KVI] WARN: Có emoji 1️⃣ nhưng không thể phân tích câu hỏi. Chuyển sang bấm Talk.", flush=True)
+                 threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
+
+        # TRƯỜNG HỢP 2: NẾU KHÔNG CÓ EMOJI 1️⃣ -> CHẠY LOGIC MẶC ĐỊNH
+        else:
             if "Your Affection Rating has not changed" in desc or "Affection Points" in desc:
-                if time.time() - last_session_end_time > 60: # Chống spam
+                if time.time() - last_session_end_time > 60:
                     last_session_end_time = time.time()
                     with lock:
                         next_kvi_allowed_time = time.time() + 1800
                         print(f"[AUTO KVI] INFO: Phiên KVI kết thúc. KVI tiếp theo được phép sau {time.strftime('%H:%M:%S', time.localtime(next_kvi_allowed_time))}", flush=True)
                         save_settings()
             else:
+                print("[AUTO KVI] INFO: Không có emoji 1️⃣. Thực hiện hành động mặc định (Click Talk).", flush=True)
                 threading.Thread(target=smart_button_click, args=(bot, m), daemon=True).start()
 
     def periodic_kvi_sender():
-        # SỬA LỖI CÚ PHÁP: Dùng 'global' cho biến toàn cục
         nonlocal last_action_time, last_kvi_send_time
         global next_kvi_allowed_time
         
@@ -1122,3 +1121,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"[SERVER] Khởi động Web Server tại http://0.0.0.0:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
+
